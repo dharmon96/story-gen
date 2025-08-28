@@ -1,0 +1,28 @@
+Lets move the model configuration into the settings tab with the other configuration popups. We can still keep the AI status in the main story generator tab showing us what instances and models are loaded. Everything from the model assignments can be moved. Refresh and network scan can remain in the main story generator tab and we should have a display next to which models are configured AND connected to the right configuration properly. In the settings tab, we should have some more detailed node information that is displayed for each step without opening the configuration menu, so we can check which step has what nodes assigned and if they are currently connected. This will serve as information only, we will keep the exact same configure models popup. In a bit, we will add the ability to add additional nodes to each render step and make the queue take into consideration available nodes that are assigned to each step, so multiple node assignments per step will eventually be added as to the more detailed view. Please confirm that this all makes sense, make a plan and check with me before executing.
+
+Add the ability to add additional nodes in the model configuration, that allows us to use multiple PCs simultaneously to offload different parts of the production. The nodes should update their current state, if the node is added and available for a current step, it will be tasked with that step. IE in the story creation or any other model, I can add 2 pc's that can dynamically queue when the status is available. A node can be used for both textllm and comfyui so make sure that the queue accounts for both so a node isn't trying to do any textllm or comfyui process at the same time.
+
+improve UI, make it look clean and mode. Make sure the layout makes sense, if not, improve the usability. Make dark mode/light mode that follows Windows theme. Add colored pastel accents to different aspects to make things clean and organized.
+
+fix ETA in story queue and popup. Disable auto closing of generation progress popup on completion.
+
+The generated content section (story, shotlist, style references) still doesn't load if I open the window mid-generation, it appears to work if I open after the generation is completed. Please remove the generation progress popup auto closing when complete, no matter when its opened.
+
+Fix the progress bar in the story queue tab to follow the overall progress properly.
+
+In the generation progress popup, lets add a single tab that catalogs the Music Cues and Narration from the LLM by time. Make this intuitive to see like the style reference and shot list tabs. We should definitely see the start of the music cue & shot its cueing with, the length of the music, the genre/prompt, and the timeline of cues and narration. In the future, there may be additions for transitions in the music. For narration, it should list the shot its cueing with & timestamp, and the dialogue its reading. In the future we will display the progress of these through suno and elevenlabs and be able to play the file that is generated. Think of a clean way to display this and if we need to display anything else. We are already doing most of the prompting and generation, we will just integrate the actual suno & elevenlabs api in the future.
+
+when the app starts, it finds the local instance but for some reason doesn't instantly find the network instances until I click refresh or network scan.
+
+Lets also remove the recent stories now that we have a story queue.
+
+Auto generation throws an error:
+
+Clearing completed from queue doesn't work.
+
+When saving OpenAI config setings, this pops up. Failed to save presets: [Errno 13] Permission Denied: 'custom_presets.json'
+
+https://davidteather.github.io/TikTok-Api/#tiktokapi-full-documentation, https://davidteather.github.io/TikTok-Api/TikTokApi.api.html#tiktok-api-docs, https://davidteather.github.io/TikTok-Api/TikTokApi.html#tiktok-api-main
+Using this documentation- please update the researcher to utilize tiktok api in the best way it can for our app. 
+
+The shotlister needs to provide more detailed shot descriptions, or have a better prompt. Its only producing simple shots details, causing the comfyui prompts to be off, misleading, or lack direction. The style sheet either isn't triggering properly, isnt loading in the generation progress popup, or isn't updating. Lets make sure when the shot list is being created, its detailed enough for the comfyui prompt generator to recognize locations from the style sheet and properly create prompts including the style consistencies for the location.
