@@ -5,8 +5,8 @@
       "gpt-oss:20b"
     ],
     "characters": [
-      "192.168.0.164:11434",
-      "llama3.2:latest"
+      "localhost:11434",
+      "deepseek-r1:8b"
     ],
     "shots": [
       "localhost:11434",
@@ -14,15 +14,15 @@
     ],
     "prompts": [
       "localhost:11434",
-      "gpt-oss:20b"
+      "deepseek-r1:8b"
     ],
     "narration": [
-      "192.168.0.164:11434",
-      "llama3.2:latest"
+      "localhost:11434",
+      "deepseek-r1:8b"
     ],
     "music": [
-      "192.168.0.164:11434",
-      "llama3.2:latest"
+      "localhost:11434",
+      "deepseek-r1:8b"
     ]
   },
   "config": {

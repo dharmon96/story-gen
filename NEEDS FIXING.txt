@@ -22,7 +22,7 @@ Clearing completed from queue doesn't work.
 
 When saving OpenAI config setings, this pops up. Failed to save presets: [Errno 13] Permission Denied: 'custom_presets.json'
 
-https://davidteather.github.io/TikTok-Api/#tiktokapi-full-documentation, https://davidteather.github.io/TikTok-Api/TikTokApi.api.html#tiktok-api-docs, https://davidteather.github.io/TikTok-Api/TikTokApi.html#tiktok-api-main
 Using this documentation- please update the researcher to utilize tiktok api in the best way it can for our app. 
+https://davidteather.github.io/TikTok-Api/#tiktokapi-full-documentation, https://davidteather.github.io/TikTok-Api/TikTokApi.api.html#tiktok-api-docs, https://davidteather.github.io/TikTok-Api/TikTokApi.html#tiktok-api-main
 
-The shotlister needs to provide more detailed shot descriptions, or have a better prompt. Its only producing simple shots details, causing the comfyui prompts to be off, misleading, or lack direction. The style sheet either isn't triggering properly, isnt loading in the generation progress popup, or isn't updating. Lets make sure when the shot list is being created, its detailed enough for the comfyui prompt generator to recognize locations from the style sheet and properly create prompts including the style consistencies for the location.
+The shotlister needs to provide slightly more detailed shot descriptions. Lets make sure we are detailing the character, location, character actions, and camera movement. It doesn't need to be a lot of text, just more than a simple "Maya goes into the kitchen". When its only producing simple shots details, causing the comfyui prompts to be off, misleading, or lack direction.
