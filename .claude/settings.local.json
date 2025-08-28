@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(timeout:*)",
+      "Bash(grep:*)",
+      "Read(d:\\AI\\storygen backup/**)",
+      "Read(D:\\AI\\storygen backup/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

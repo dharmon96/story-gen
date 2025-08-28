@@ -18,10 +18,12 @@ from data_models import StoryConfig, Shot
 from database import DatabaseManager
 from ollama_manager import OllamaManager
 from story_generator import StoryGenerator
-from generation_progress_popup import GenerationProgressWindow, EnhancedGenerationManager
+from generation_progress_popup import GenerationProgressWindow
 from model_selection_dialog import ModelSelectionDialog
 from research_tab import ResearchTab
 from settings_dialog import SettingsDialog
+from story_queue import StoryQueue
+from story_queue_tab import StoryQueueTab
 
 class FilmGeneratorApp:
     """Main GUI Application Class"""
@@ -35,6 +37,10 @@ class FilmGeneratorApp:
         self.db = DatabaseManager()
         self.ollama = OllamaManager()
         self.story_gen = StoryGenerator(self.ollama, self.db)
+        
+        # Initialize story queue
+        self.story_queue = StoryQueue(self.db)
+        self.story_queue.set_story_generator(self.story_gen)
         
         # Queue for thread communication
         self.log_queue = queue.Queue()
@@ -64,6 +70,258 @@ class FilmGeneratorApp:
         self.enhanced_generator = None
         self.progress_window = None
     
+    def start_generation(self):
+        """Start story generation - add to queue instead of direct generation"""
+        try:
+            # Get configuration from UI
+            config = self.get_story_config_from_ui()
+            
+            # Validate configuration
+            if not self.validate_story_config(config):
+                return
+            
+            # Add to queue instead of direct generation
+            queue_id = self.story_queue.add_to_queue(config, priority=5, continuous=False)
+            
+            # Update UI
+            self.status_label.config(text=f"Status: Story added to queue (ID: {queue_id})")
+            self.add_log(f"Story added to generation queue (ID: {queue_id})", "Info")
+            
+            # Switch to story queue tab to show progress
+            self.notebook.select(self.story_queue_tab)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to start generation: {e}")
+            self.add_log(f"Error starting generation: {e}", "Error")
+    
+    def stop_generation(self):
+        """Stop generation - pause queue processing"""
+        try:
+            self.story_queue.pause_queue()
+            self.status_label.config(text="Status: Generation paused")
+            self.add_log("Generation queue paused", "Info")
+        except Exception as e:
+            self.add_log(f"Error stopping generation: {e}", "Error")
+    
+    def get_story_config_from_ui(self) -> StoryConfig:
+        """Get story configuration from UI inputs"""
+        # Get aspect ratio key from display name
+        aspect_ratio_name = self.aspect_ratio_var.get()
+        aspect_ratio_key = "vertical"  # default
+        for key, data in RENDER_SETTINGS['aspect_ratios'].items():
+            if data['name'] == aspect_ratio_name:
+                aspect_ratio_key = key
+                break
+        
+        # Get FPS key from display name
+        fps_name = self.fps_var.get()
+        fps_key = "24fps"  # default
+        for key, data in RENDER_SETTINGS['fps_options'].items():
+            if data['name'] == fps_name:
+                fps_key = key
+                break
+        
+        return StoryConfig(
+            prompt=self.prompt_entry.get().strip(),
+            genre=self.genre_var.get(),
+            length=self.length_var.get(),
+            visual_style=self.style_var.get(),
+            aspect_ratio=aspect_ratio_key,
+            fps=fps_key,
+            auto_prompt=self.auto_prompt_var.get(),
+            auto_genre=self.auto_genre_var.get(),
+            auto_length=self.auto_length_var.get(),
+            auto_style=self.auto_style_var.get()
+        )
+    
+    def validate_story_config(self, config: StoryConfig) -> bool:
+        """Validate story configuration"""
+        if not config.auto_prompt and not config.prompt:
+            messagebox.showerror("Error", "Please enter a story prompt or enable Auto Prompt.")
+            return False
+        
+        if not config.auto_genre and not config.genre:
+            messagebox.showerror("Error", "Please select a genre or enable Auto Genre.")
+            return False
+        
+        if not config.auto_length and not config.length:
+            messagebox.showerror("Error", "Please select a length or enable Auto Length.")
+            return False
+        
+        if not config.auto_style and not config.visual_style:
+            messagebox.showerror("Error", "Please select a visual style or enable Auto Style.")
+            return False
+        
+        return True
+    
+    # Render Queue Methods
+    
+    def on_render_queue_click(self, event):
+        """Handle single click on render queue item - check if Actions column clicked"""
+        item = self.render_queue_tree.selection()[0] if self.render_queue_tree.selection() else None
+        if not item:
+            return
+            
+        # Get the column that was clicked
+        column = self.render_queue_tree.identify_column(event.x)
+        # Actions column is column 6 (0-indexed, including #0)
+        if column == '#6':  # Actions column
+            self.view_render_progress()
+    
+    def on_render_queue_double_click(self, event):
+        """Handle double-click on render queue item"""
+        self.view_render_progress()
+    
+    def view_render_progress(self):
+        """View progress for selected render queue item"""
+        selection = self.render_queue_tree.selection()
+        if not selection:
+            messagebox.showinfo("No Selection", "Please select a render queue item first.")
+            return
+        
+        # Get the selected item data
+        item = self.render_queue_tree.item(selection[0])
+        queue_id = item['text']
+        values = item['values']
+        
+        if not queue_id:
+            return
+            
+        # Get story ID from database
+        cursor = self.db.conn.cursor()
+        cursor.execute('''
+            SELECT s.story_id, st.title 
+            FROM render_queue rq
+            JOIN shots s ON rq.shot_id = s.id  
+            JOIN stories st ON s.story_id = st.id
+            WHERE rq.id = ?
+        ''', (queue_id,))
+        result = cursor.fetchone()
+        
+        if result:
+            story_id = result[0]
+            story_title = result[1]
+            
+            # Create or show existing progress window for this story
+            if not hasattr(self, 'render_progress_windows'):
+                self.render_progress_windows = {}
+                
+            if story_id in self.render_progress_windows:
+                # Bring existing window to front
+                self.render_progress_windows[story_id].root.lift()
+                self.render_progress_windows[story_id].root.focus()
+            else:
+                # Create new progress window for render monitoring
+                from generation_progress_popup import GenerationProgressWindow
+                from data_models import StoryConfig
+                
+                # Create a minimal config for the progress window
+                config = StoryConfig(prompt="Render monitoring", genre="N/A", length="N/A")
+                progress_window = GenerationProgressWindow(None, config)
+                progress_window.root.title(f"Render Progress - {story_title}")
+                
+                # Store reference
+                self.render_progress_windows[story_id] = progress_window
+                
+                # Set up cleanup when window closes
+                def on_window_close():
+                    if story_id in self.render_progress_windows:
+                        del self.render_progress_windows[story_id]
+                
+                progress_window.root.protocol("WM_DELETE_WINDOW", 
+                    lambda: [progress_window.root.destroy(), on_window_close()])
+                
+                # Load story data and show in storyboard tab
+                self._load_story_for_render_progress(progress_window, story_id)
+        else:
+            messagebox.showerror("Error", "Could not find story data for this render item.")
+    
+    def _load_story_for_render_progress(self, progress_window, story_id):
+        """Load story data into render progress window"""
+        try:
+            # Get story data
+            cursor = self.db.conn.cursor()
+            cursor.execute('SELECT * FROM stories WHERE id = ?', (story_id,))
+            story_row = cursor.fetchone()
+            
+            if story_row:
+                story_data = dict(story_row)
+                
+                # Get shots
+                cursor.execute('SELECT * FROM shots WHERE story_id = ? ORDER BY shot_number', (story_id,))
+                shots = [dict(row) for row in cursor.fetchall()]
+                
+                # Update progress window with story data
+                progress_window.update_progress('render_monitoring', 100, {
+                    'story_data': story_data,
+                    'shots': shots,
+                    'current_step': 'Monitoring render progress'
+                })
+                
+                # Switch to storyboard tab to show render progress
+                progress_window.notebook.select(1)  # Storyboard tab
+                
+        except Exception as e:
+            print(f"Error loading story for render progress: {e}")
+    
+    def refresh_render_queue(self):
+        """Refresh render queue display with story titles"""
+        stats = self.db.get_render_queue_status()
+        for key, label in self.render_queue_stats_labels.items():
+            label.config(text=f"{key.capitalize()}: {stats.get(key, 0)}")
+        
+        for item in self.render_queue_tree.get_children():
+            self.render_queue_tree.delete(item)
+        
+        cursor = self.db.conn.cursor()
+        cursor.execute('''
+            SELECT rq.*, s.shot_number, s.story_id, st.title as story_title
+            FROM render_queue rq
+            JOIN shots s ON rq.shot_id = s.id
+            JOIN stories st ON s.story_id = st.id
+            WHERE DATE(rq.queued_at) = DATE('now')
+            ORDER BY rq.priority DESC, rq.queued_at ASC
+        ''')
+        
+        for row in cursor.fetchall():
+            self.render_queue_tree.insert('', 'end', 
+                                        text=str(row['id']),
+                                        values=(
+                                            f"Shot {row['shot_number']}",
+                                            row['story_title'][:30] + "..." if len(row['story_title']) > 30 else row['story_title'],
+                                            row['status'].capitalize(),
+                                            row['attempts'],
+                                            "📊 View",  # Actions column
+                                            row['queued_at'][:16] if row['queued_at'] else 'N/A'
+                                        ))
+    
+    def clear_all_render_queue(self):
+        """Clear all items from render queue"""
+        if messagebox.askyesno("Clear Queue", "Clear ALL items from render queue?"):
+            self.db.clear_render_queue()
+            self.refresh_render_queue()
+            self.add_log("Cleared all items from render queue", "Database")
+    
+    def clear_completed_render_queue(self):
+        """Clear completed items from render queue"""
+        cursor = self.db.conn.cursor()
+        cursor.execute("DELETE FROM render_queue WHERE status = 'completed'")
+        self.db.conn.commit()
+        self.refresh_render_queue()
+        self.add_log("Cleared completed items from render queue", "Database")
+    
+    def retry_failed_renders(self):
+        """Retry failed render queue items"""
+        cursor = self.db.conn.cursor()
+        cursor.execute("""
+            UPDATE render_queue 
+            SET status = 'queued', error_message = NULL 
+            WHERE status = 'failed' AND attempts < 3
+        """)
+        self.db.conn.commit()
+        self.refresh_render_queue()
+        self.add_log("Reset failed items in render queue for retry", "Database")
+    
     def setup_ui(self):
         """Setup main UI components"""
         # Create notebook for tabs
@@ -74,23 +332,26 @@ class FilmGeneratorApp:
         self.story_tab = ttk.Frame(self.notebook)
         self.logs_tab = ttk.Frame(self.notebook)
         self.metrics_tab = ttk.Frame(self.notebook)
-        self.queue_tab = ttk.Frame(self.notebook)
+        self.story_queue_tab = ttk.Frame(self.notebook)
+        self.render_queue_tab = ttk.Frame(self.notebook)
         self.research_tab = ttk.Frame(self.notebook)
         self.settings_tab = ttk.Frame(self.notebook)
         
         self.notebook.add(self.story_tab, text='Story Generator')
+        self.notebook.add(self.story_queue_tab, text='Story Queue')
+        self.notebook.add(self.render_queue_tab, text='Render Queue')
         self.notebook.add(self.research_tab, text='Research')
         self.notebook.add(self.logs_tab, text='Logs')
         self.notebook.add(self.metrics_tab, text='Metrics')
-        self.notebook.add(self.queue_tab, text='Render Queue')
         self.notebook.add(self.settings_tab, text='Settings')
         
         # Setup each tab
         self.setup_story_tab()
+        self.setup_story_queue_tab()
+        self.setup_render_queue_tab()
         self.setup_research_tab()
         self.setup_logs_tab()
         self.setup_metrics_tab()
-        self.setup_queue_tab()
         self.setup_settings_tab()
     
     def setup_story_tab(self):
@@ -495,9 +756,15 @@ class FilmGeneratorApp:
                   command=self.delete_database_with_backup, 
                   style='Danger.TButton').pack(side='left', padx=5)
     
-    def setup_queue_tab(self):
+    def setup_story_queue_tab(self):
+        """Setup story queue tab"""
+        # Initialize the story queue tab component
+        self.story_queue_tab_component = StoryQueueTab(self.story_queue_tab, self.story_queue, 
+                                                     self.story_gen, self.db)
+    
+    def setup_render_queue_tab(self):
         """Setup render queue tab with clear all functionality"""
-        main_frame = ttk.Frame(self.queue_tab, padding="10")
+        main_frame = ttk.Frame(self.render_queue_tab, padding="10")
         main_frame.pack(fill='both', expand=True)
         
         title_label = ttk.Label(main_frame, text="Render Queue Monitor", 
@@ -510,7 +777,7 @@ class FilmGeneratorApp:
         stats_grid = ttk.Frame(stats_frame)
         stats_grid.pack()
         
-        self.queue_stats_labels = {
+        self.render_queue_stats_labels = {
             'queued': ttk.Label(stats_grid, text="Queued: 0"),
             'processing': ttk.Label(stats_grid, text="Processing: 0"),
             'completed': ttk.Label(stats_grid, text="Completed: 0"),
@@ -518,42 +785,50 @@ class FilmGeneratorApp:
         }
         
         col = 0
-        for label in self.queue_stats_labels.values():
+        for label in self.render_queue_stats_labels.values():
             label.grid(row=0, column=col, padx=20, pady=5)
             col += 1
         
         queue_frame = ttk.LabelFrame(main_frame, text="Render Queue", padding="10")
         queue_frame.pack(fill='both', expand=True)
         
-        columns = ('ID', 'Shot', 'Story Title', 'Status', 'Attempts', 'Queued At')
-        self.queue_tree = ttk.Treeview(queue_frame, columns=columns, show='tree headings')
+        columns = ('ID', 'Shot', 'Story Title', 'Status', 'Attempts', 'Actions', 'Queued At')
+        self.render_queue_tree = ttk.Treeview(queue_frame, columns=columns, show='tree headings')
         
         for col in columns:
-            self.queue_tree.heading(col, text=col)
+            self.render_queue_tree.heading(col, text=col)
             if col == 'Story Title':
-                self.queue_tree.column(col, width=200)
+                self.render_queue_tree.column(col, width=200)
+            elif col == 'Actions':
+                self.render_queue_tree.column(col, width=80)
             else:
-                self.queue_tree.column(col, width=100)
+                self.render_queue_tree.column(col, width=100)
         
-        self.queue_tree.column('#0', width=0, stretch=False)
+        self.render_queue_tree.column('#0', width=0, stretch=False)
         
-        scrollbar = ttk.Scrollbar(queue_frame, orient='vertical', command=self.queue_tree.yview)
-        self.queue_tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar = ttk.Scrollbar(queue_frame, orient='vertical', command=self.render_queue_tree.yview)
+        self.render_queue_tree.configure(yscrollcommand=scrollbar.set)
         
-        self.queue_tree.pack(side='left', fill='both', expand=True)
+        self.render_queue_tree.pack(side='left', fill='both', expand=True)
         scrollbar.pack(side='right', fill='y')
+        
+        # Add popup button for render progress
+        self.render_queue_tree.bind('<Double-1>', self.on_render_queue_double_click)
+        self.render_queue_tree.bind('<Button-1>', self.on_render_queue_click)
         
         control_frame = ttk.Frame(main_frame)
         control_frame.pack(fill='x', pady=10)
         
+        ttk.Button(control_frame, text="📊 View Progress", 
+                  command=self.view_render_progress).pack(side='left', padx=5)
         ttk.Button(control_frame, text="Refresh Queue", 
-                  command=self.refresh_queue).pack(side='left', padx=5)
+                  command=self.refresh_render_queue).pack(side='left', padx=5)
         ttk.Button(control_frame, text="Clear All", 
-                  command=self.clear_all_queue).pack(side='left', padx=5)
+                  command=self.clear_all_render_queue).pack(side='left', padx=5)
         ttk.Button(control_frame, text="Clear Completed", 
-                  command=self.clear_completed_queue).pack(side='left', padx=5)
+                  command=self.clear_completed_render_queue).pack(side='left', padx=5)
         ttk.Button(control_frame, text="Retry Failed", 
-                  command=self.retry_failed).pack(side='left', padx=5)
+                  command=self.retry_failed_renders).pack(side='left', padx=5)
     
     def setup_settings_tab(self):
         """Setup settings and configuration tab"""
@@ -830,263 +1105,6 @@ System Prompt Presets:
         self.progress_var.set(value)
         self.progress_text.config(text=text)
         self.root.update_idletasks()
-    
-    def start_generation(self):
-        """Start story generation with enhanced progress popup"""
-        if self.is_generating:
-            return
-        
-        self.is_generating = True
-        self.run_button.config(state='disabled')
-        self.stop_button.config(state='normal')
-        self.status_label.config(text="Status: Generating...")
-        
-        config = self.get_story_config()
-        
-        # Create progress popup
-        self.progress_window = GenerationProgressWindow(
-            self.root, 
-            config,
-            self.on_generation_popup_complete
-        )
-        
-        # Start enhanced generation
-        self.start_enhanced_generation_worker(config)
-
-   # Update the enhanced generation worker in gui.py to handle errors properly:
-
-    def start_enhanced_generation_worker(self, config):
-        """Enhanced generation worker - STOPS on AI errors, no simulation"""
-        def generation_thread():
-            try:
-                # Pre-check: Verify Ollama is available
-                if not self.ollama.available:
-                    error_msg = "Ollama not available - check connection and select a model"
-                    if self.progress_window:
-                        self.progress_window.add_ai_message('error', error_msg, 'system')
-                    self.add_log(error_msg, "Error")
-                    return
-                
-                if not self.ollama.get_current_model() or self.ollama.get_current_model() == 'None':
-                    error_msg = "No model selected - select a model from the dropdown first"
-                    if self.progress_window:
-                        self.progress_window.add_ai_message('error', error_msg, 'system')
-                    self.add_log(error_msg, "Error")
-                    return
-                
-                # Set progress window reference
-                if hasattr(self.story_gen, 'set_progress_window'):
-                    self.story_gen.set_progress_window(self.progress_window)
-                
-                # Step 1: Story Generation
-                self.progress_window.update_step('story', 10, 'processing', 'Sending request to AI...')
-                
-                try:
-                    story = self.story_gen.generate_story(config)
-                    
-                    if not story:
-                        raise Exception("Story generation returned empty result")
-                    
-                    self.progress_window.update_step('story', 100, 'completed', f"Created: {story['title']}")
-                    self.add_log(f"Story generated successfully: {story['title']}", "AI")
-                    
-                except Exception as e:
-                    self.progress_window.update_step('story', 0, 'error', f'Failed: {str(e)}')
-                    self.add_log(f"Story generation failed: {str(e)}", "Error")
-                    return  # STOP here - don't continue
-                
-                # Save story to database
-                try:
-                    story_id = self.db.save_story(story)
-                    self.db.save_generation_history(story_id, config)
-                    self.add_log(f"Story saved to database: {story_id}", "Database")
-                except Exception as e:
-                    self.add_log(f"Database save failed: {str(e)}", "Error")
-                    return
-                
-                # Step 2: Shot List Creation
-                self.progress_window.update_step('shots', 10, 'processing', 'Converting to shot list...')
-                
-                try:
-                    shots = self.story_gen.create_shot_list(story)
-                    
-                    if not shots:
-                        raise Exception("Shot list creation returned empty result")
-                    
-                    self.progress_window.update_step('shots', 100, 'completed', f"{len(shots)} shots created")
-                    self.add_log(f"Shot list created: {len(shots)} shots", "AI")
-                    
-                except Exception as e:
-                    self.progress_window.update_step('shots', 0, 'error', f'Failed: {str(e)}')
-                    self.add_log(f"Shot list creation failed: {str(e)}", "Error")
-                    return  # STOP here
-                
-                # Step 3-5: Process individual shots
-                total_shots = len(shots)
-                completed_prompts = 0
-                completed_narration = 0
-                completed_music = 0
-                
-                for idx, shot in enumerate(shots):
-                    try:
-                        # Save shot to database first
-                        shot_id = self.db.save_shot(shot)
-                        shot.id = shot_id
-                        
-                        current_progress = ((idx + 1) / total_shots) * 100
-                        
-                        # Generate visual prompts
-                        try:
-                            self.progress_window.update_step('prompts', current_progress, 'processing', f'Shot {idx+1}/{total_shots}')
-                            self.story_gen.generate_wan_prompt(shot)
-                            completed_prompts += 1
-                        except Exception as e:
-                            self.progress_window.update_step('prompts', current_progress, 'error', f'Shot {idx+1} failed: {str(e)}')
-                            self.add_log(f"Prompt generation failed for shot {idx+1}: {str(e)}", "Error")
-                            return  # STOP on error
-                        
-                        # Generate narration
-                        try:
-                            self.progress_window.update_step('narration', current_progress, 'processing', f'Shot {idx+1}/{total_shots}')
-                            self.story_gen.generate_elevenlabs_script(shot)
-                            completed_narration += 1
-                        except Exception as e:
-                            self.progress_window.update_step('narration', current_progress, 'error', f'Shot {idx+1} failed: {str(e)}')
-                            self.add_log(f"Narration generation failed for shot {idx+1}: {str(e)}", "Error")
-                            return  # STOP on error
-                        
-                        # Generate music if needed
-                        if shot.music_cue:
-                            try:
-                                self.progress_window.update_step('music', current_progress, 'processing', f'Shot {idx+1}/{total_shots}')
-                                self.story_gen.generate_suno_prompt(shot)
-                                completed_music += 1
-                            except Exception as e:
-                                self.progress_window.update_step('music', current_progress, 'error', f'Shot {idx+1} failed: {str(e)}')
-                                self.add_log(f"Music generation failed for shot {idx+1}: {str(e)}", "Error")
-                                return  # STOP on error
-                        
-                        # Update shot in database with generated content
-                        try:
-                            cursor = self.db.conn.cursor()
-                            cursor.execute('''
-                                UPDATE shots 
-                                SET wan_prompt = ?, narration = ?, music_cue = ?, status = 'ready'
-                                WHERE id = ?
-                            ''', (shot.wan_prompt, shot.narration, shot.music_cue, shot_id))
-                            self.db.conn.commit()
-                            
-                            # Add to render queue
-                            priority = 10 if shot.shot_number == 1 else 5
-                            self.db.add_to_render_queue(shot_id, priority)
-                            
-                        except Exception as e:
-                            self.add_log(f"Database update failed for shot {idx+1}: {str(e)}", "Error")
-                            return
-                    
-                    except Exception as e:
-                        self.add_log(f"Failed processing shot {idx+1}: {str(e)}", "Error")
-                        return  # STOP on any shot processing error
-                
-                # Mark completion only if ALL steps succeeded
-                self.progress_window.update_step('prompts', 100, 'completed', f'{completed_prompts} visual prompts generated')
-                self.progress_window.update_step('narration', 100, 'completed', f'{completed_narration} narration scripts created')
-                self.progress_window.update_step('music', 100, 'completed', f'Music cues completed')
-                self.progress_window.update_step('queue', 100, 'completed', f'{total_shots} shots queued for rendering')
-                
-                # Mark story as ready
-                try:
-                    self.db.conn.execute("UPDATE stories SET status = 'ready' WHERE id = ?", (story_id,))
-                    self.db.conn.commit()
-                except Exception as e:
-                    self.add_log(f"Failed to mark story as ready: {str(e)}", "Error")
-                    return
-                
-                # Update current story display
-                self.current_story = story
-                self.current_shots = shots
-                self.root.after(0, lambda: self.update_story_display(story))
-                
-                self.progress_window.add_ai_message('success', f"Story '{story['title']}' fully generated and queued for rendering!", 'complete')
-                self.add_log(f"Generation completed successfully: {story['title']}", "AI")
-                
-            except Exception as e:
-                # Top-level error handling
-                error_msg = f"Generation process failed: {str(e)}"
-                if self.progress_window:
-                    self.progress_window.add_ai_message('error', error_msg, 'system')
-                self.add_log(error_msg, "Error")
-                import traceback
-                self.add_log(traceback.format_exc(), "Error")
-            
-            finally:
-                # Always clean up
-                self.root.after(0, self.on_generation_popup_complete)
-        
-        # Start generation thread
-        thread = threading.Thread(target=generation_thread, daemon=True)
-        thread.start()
-
-    # Also add this method to prevent simulation mode entirely:
-
-    def check_ai_ready(self):
-        """Check if AI is ready before allowing generation"""
-        if not self.ollama.available:
-            messagebox.showerror("AI Not Available", 
-                            "Ollama is not available. Please:\n"
-                            "1. Make sure 'ollama serve' is running\n"
-                            "2. Click 'Test Connection'\n" 
-                            "3. Select a model from the dropdown")
-            return False
-        
-        if not self.ollama.get_current_model() or self.ollama.get_current_model() == 'None':
-            messagebox.showerror("No Model Selected",
-                            "Please select a model from the dropdown before generating stories.")
-            return False
-        
-        return True
-
-    # Update the start_generation method to use the check:
-
-    def start_generation(self):
-        """Start story generation with AI verification"""
-        if self.is_generating:
-            return
-        
-        # Check AI readiness FIRST
-        if not self.check_ai_ready():
-            return  # Don't start if AI isn't ready
-        
-        self.is_generating = True
-        self.run_button.config(state='disabled')
-        self.stop_button.config(state='normal')
-        self.status_label.config(text="Status: Generating...")
-        
-        config = self.get_story_config()
-        
-        # Create progress popup
-        self.progress_window = GenerationProgressWindow(
-            self.root, 
-            config,
-            self.on_generation_popup_complete
-        )
-        
-        # Start enhanced generation
-        self.start_enhanced_generation_worker(config)
-
-    def on_generation_popup_complete(self):
-        """Called when generation popup closes"""
-        self.is_generating = False
-        self.run_button.config(state='normal')
-        self.stop_button.config(state='disabled')
-        self.status_label.config(text="Status: Ready")
-        
-        # Refresh all displays
-        self.refresh_recent_stories()
-        self.refresh_queue()
-        self.refresh_metrics()
-        
-        self.add_log("Enhanced generation completed", "Info")
     
     def stop_generation(self):
         """Stop story generation"""
@@ -1420,34 +1438,8 @@ System Prompt Presets:
                 self.best_length_label.config(text=f"Optimal Length: {best_length}")
     
     def refresh_queue(self):
-        """Refresh render queue display with story titles"""
-        stats = self.db.get_render_queue_status()
-        for key, label in self.queue_stats_labels.items():
-            label.config(text=f"{key.capitalize()}: {stats.get(key, 0)}")
-        
-        for item in self.queue_tree.get_children():
-            self.queue_tree.delete(item)
-        
-        cursor = self.db.conn.cursor()
-        cursor.execute('''
-            SELECT rq.*, s.shot_number, s.story_id, st.title as story_title
-            FROM render_queue rq
-            JOIN shots s ON rq.shot_id = s.id
-            JOIN stories st ON s.story_id = st.id
-            WHERE DATE(rq.queued_at) = DATE('now')
-            ORDER BY rq.queued_at DESC
-            LIMIT 50
-        ''')
-        
-        for row in cursor.fetchall():
-            self.queue_tree.insert('', 'end', values=(
-                row['id'],
-                f"Shot {row['shot_number']}",
-                row['story_title'],
-                row['status'],
-                row['attempts'],
-                row['queued_at'][:16]
-            ))
+        """Refresh render queue display with story titles (legacy method - redirect to render queue)"""
+        self.refresh_render_queue()
     
     def simulate_metrics(self):
         """Simulate metrics for testing"""

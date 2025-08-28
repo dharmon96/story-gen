@@ -467,7 +467,7 @@ Length: {story['length']}
                     self.progress_window.update_step_node_info('prompts', node_name, 'ollama', selected_model)
                 
                 add_log(f"Generating Wan 2.2 prompt for shot {shot.shot_number}...", "AI")
-                self.generate_wan_prompt(shot, story_id, optimized_config.visual_style)
+                self.generate_wan_prompt(shot, story_id, optimized_config.visual_style, characters, locations)
                 
                 # Only generate narration if shot requires dialogue/narration
                 if shot.narration and shot.narration.strip() != "":
@@ -700,15 +700,52 @@ Length: {story['length']}
                 self.progress_window.add_ai_message('error', f"Shot list creation failed: {str(e)}", 'shots')
             raise Exception(f"Failed to create shot list: {str(e)}")
 
-    def generate_wan_prompt(self, shot: Shot, story_id: str = None, visual_style: str = None):
+    def generate_wan_prompt(self, shot: Shot, story_id: str = None, visual_style: str = None, characters: List[Dict] = None, locations: List[Dict] = None):
         """Generate Wan 2.2 prompt with character consistency and visual style - handles <think> tags"""
         if not self.ollama.available:
             raise Exception("Ollama not available for prompt generation")
         
-        # Simple user prompt with shot data - system prompt handles the technical details
+        # Build enhanced user prompt with character and location data
         prompt = f"""Shot: {shot.description}
 Duration: {shot.duration}s
 Shot #{shot.shot_number}"""
+
+        # Add character descriptions if available
+        if characters:
+            relevant_characters = []
+            for char in characters:
+                # Check if this character might appear in this shot (simple text matching)
+                char_name_lower = char['name'].lower()
+                shot_desc_lower = shot.description.lower()
+                
+                # Look for character name or role references in shot description
+                if (char_name_lower in shot_desc_lower or 
+                    any(word in shot_desc_lower for word in char_name_lower.split()) or
+                    char['role'].lower() in shot_desc_lower):
+                    relevant_characters.append(char)
+            
+            if relevant_characters:
+                prompt += "\n\nCharacter Descriptions:"
+                for char in relevant_characters:
+                    prompt += f"\n- {char['name']} ({char['role']}): {char['physical_description']}, {char['age_range']}, {char['clothing_style']}"
+
+        # Add location descriptions if available  
+        if locations:
+            relevant_locations = []
+            for loc in locations:
+                loc_name_lower = loc['name'].lower()
+                shot_desc_lower = shot.description.lower()
+                
+                # Look for location references in shot description
+                if (loc_name_lower in shot_desc_lower or
+                    any(word in shot_desc_lower for word in loc_name_lower.split()) or
+                    loc['environment_type'].lower() in shot_desc_lower):
+                    relevant_locations.append(loc)
+            
+            if relevant_locations:
+                prompt += "\n\nLocation Descriptions:"
+                for loc in relevant_locations:
+                    prompt += f"\n- {loc['name']}: {loc['description']}, {loc['lighting_style']} lighting, {loc['time_of_day']}"
 
         # Log FULL request
         if self.progress_window:

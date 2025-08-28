@@ -273,6 +273,49 @@ def init_database():
             )
         ''')
 
+        # Story queue table - Queue management for batch story generation
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS story_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                queue_position INTEGER,
+                story_config JSON NOT NULL,
+                priority INTEGER DEFAULT 5,
+                status TEXT DEFAULT 'queued',
+                current_step TEXT DEFAULT 'pending',
+                progress_data JSON,
+                story_id TEXT,
+                continuous_generation BOOLEAN DEFAULT 0,
+                error_message TEXT,
+                attempts INTEGER DEFAULT 0,
+                max_attempts INTEGER DEFAULT 3,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                started_at TIMESTAMP,
+                completed_at TIMESTAMP,
+                estimated_completion TIMESTAMP,
+                FOREIGN KEY (story_id) REFERENCES stories (id)
+            )
+        ''')
+
+        # Queue configuration table - Settings for continuous generation
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS queue_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                continuous_enabled BOOLEAN DEFAULT 0,
+                render_queue_high_threshold INTEGER DEFAULT 50,
+                render_queue_low_threshold INTEGER DEFAULT 10,
+                max_concurrent_generations INTEGER DEFAULT 1,
+                auto_priority_boost BOOLEAN DEFAULT 1,
+                retry_failed_items BOOLEAN DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # Initialize default queue config
+        cursor.execute('''
+            INSERT OR IGNORE INTO queue_config (id) VALUES (1)
+        ''')
+
         # Performance summary view
         cursor.execute('''
             CREATE VIEW IF NOT EXISTS story_performance AS
@@ -1039,3 +1082,239 @@ class DatabaseManager:
             preset['preset_data'] = json.loads(preset['preset_data'])
             return preset
         return None
+    
+    # Story Queue Management Methods
+    
+    def add_to_story_queue(self, story_config: Dict, priority: int = 5, continuous: bool = False) -> int:
+        """Add story to generation queue"""
+        cursor = self.conn.cursor()
+        
+        # Get next queue position
+        cursor.execute('SELECT MAX(queue_position) FROM story_queue WHERE status = "queued"')
+        max_pos = cursor.fetchone()[0]
+        next_position = (max_pos or 0) + 1
+        
+        cursor.execute('''
+            INSERT INTO story_queue (
+                queue_position, story_config, priority, continuous_generation, current_step
+            ) VALUES (?, ?, ?, ?, ?)
+        ''', (next_position, json.dumps(story_config), priority, continuous, 'pending'))
+        
+        self.conn.commit()
+        return cursor.lastrowid
+    
+    def get_next_queue_item(self) -> Optional[Dict]:
+        """Get next item from story queue"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT * FROM story_queue 
+            WHERE status = 'queued'
+            ORDER BY priority DESC, queue_position ASC
+            LIMIT 1
+        ''')
+        result = cursor.fetchone()
+        if result:
+            item = dict(result)
+            item['story_config'] = json.loads(item['story_config'])
+            item['progress_data'] = json.loads(item['progress_data']) if item['progress_data'] else {}
+            return item
+        return None
+    
+    def update_queue_item_status(self, queue_id: int, status: str, current_step: str = None, 
+                                progress_data: Dict = None, story_id: str = None, error: str = None):
+        """Update queue item status and progress"""
+        cursor = self.conn.cursor()
+        
+        update_fields = ['status = ?']
+        update_values = [status]
+        
+        if current_step:
+            update_fields.append('current_step = ?')
+            update_values.append(current_step)
+        
+        if progress_data:
+            update_fields.append('progress_data = ?')
+            update_values.append(json.dumps(progress_data))
+        
+        if story_id:
+            update_fields.append('story_id = ?')
+            update_values.append(story_id)
+        
+        if error:
+            update_fields.append('error_message = ?')
+            update_values.append(error)
+        
+        if status == 'processing':
+            update_fields.append('started_at = CURRENT_TIMESTAMP')
+        elif status in ['completed', 'failed']:
+            update_fields.append('completed_at = CURRENT_TIMESTAMP')
+        
+        update_values.append(queue_id)
+        
+        cursor.execute(f'''
+            UPDATE story_queue 
+            SET {', '.join(update_fields)}
+            WHERE id = ?
+        ''', update_values)
+        
+        self.conn.commit()
+    
+    def get_queue_items(self, status: str = None, limit: int = None) -> List[Dict]:
+        """Get queue items, optionally filtered by status"""
+        cursor = self.conn.cursor()
+        
+        query = 'SELECT * FROM story_queue'
+        params = []
+        
+        if status:
+            query += ' WHERE status = ?'
+            params.append(status)
+        
+        query += ' ORDER BY priority DESC, queue_position ASC'
+        
+        if limit:
+            query += ' LIMIT ?'
+            params.append(limit)
+        
+        cursor.execute(query, params)
+        
+        items = []
+        for row in cursor.fetchall():
+            item = dict(row)
+            item['story_config'] = json.loads(item['story_config'])
+            item['progress_data'] = json.loads(item['progress_data']) if item['progress_data'] else {}
+            items.append(item)
+        
+        return items
+    
+    def get_queue_statistics(self) -> Dict:
+        """Get queue statistics"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT 
+                COUNT(CASE WHEN status = 'queued' THEN 1 END) as queued,
+                COUNT(CASE WHEN status = 'processing' THEN 1 END) as processing,
+                COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed,
+                COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed,
+                COUNT(CASE WHEN status = 'paused' THEN 1 END) as paused,
+                COUNT(*) as total
+            FROM story_queue
+            WHERE DATE(created_at) = DATE('now')
+        ''')
+        return dict(cursor.fetchone())
+    
+    def remove_from_queue(self, queue_id: int) -> bool:
+        """Remove item from queue"""
+        cursor = self.conn.cursor()
+        cursor.execute('DELETE FROM story_queue WHERE id = ?', (queue_id,))
+        deleted = cursor.rowcount > 0
+        
+        if deleted:
+            # Reorder remaining items
+            cursor.execute('''
+                UPDATE story_queue 
+                SET queue_position = (
+                    SELECT COUNT(*) FROM story_queue sq2 
+                    WHERE sq2.status = 'queued' AND sq2.id <= story_queue.id
+                )
+                WHERE status = 'queued'
+            ''')
+        
+        self.conn.commit()
+        return deleted
+    
+    def reorder_queue_item(self, queue_id: int, new_position: int):
+        """Reorder queue item to new position"""
+        cursor = self.conn.cursor()
+        
+        # Get current position
+        cursor.execute('SELECT queue_position FROM story_queue WHERE id = ?', (queue_id,))
+        result = cursor.fetchone()
+        if not result:
+            return False
+        
+        current_position = result[0]
+        
+        if current_position == new_position:
+            return True
+        
+        # Shift other items
+        if new_position < current_position:
+            cursor.execute('''
+                UPDATE story_queue 
+                SET queue_position = queue_position + 1
+                WHERE status = 'queued' AND queue_position >= ? AND queue_position < ?
+            ''', (new_position, current_position))
+        else:
+            cursor.execute('''
+                UPDATE story_queue 
+                SET queue_position = queue_position - 1
+                WHERE status = 'queued' AND queue_position > ? AND queue_position <= ?
+            ''', (current_position, new_position))
+        
+        # Update target item
+        cursor.execute('UPDATE story_queue SET queue_position = ? WHERE id = ?', (new_position, queue_id))
+        
+        self.conn.commit()
+        return True
+    
+    def clear_completed_queue_items(self, older_than_days: int = 7):
+        """Clear old completed queue items"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            DELETE FROM story_queue 
+            WHERE status IN ('completed', 'failed') 
+            AND completed_at < datetime('now', '-{} days')
+        '''.format(older_than_days))
+        self.conn.commit()
+        return cursor.rowcount
+    
+    # Queue Configuration Methods
+    
+    def get_queue_config(self) -> Dict:
+        """Get queue configuration"""
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT * FROM queue_config WHERE id = 1')
+        result = cursor.fetchone()
+        return dict(result) if result else {}
+    
+    def update_queue_config(self, config: Dict):
+        """Update queue configuration"""
+        cursor = self.conn.cursor()
+        
+        # Build update statement dynamically
+        update_fields = []
+        update_values = []
+        
+        for key, value in config.items():
+            if key in ['continuous_enabled', 'render_queue_high_threshold', 'render_queue_low_threshold',
+                      'max_concurrent_generations', 'auto_priority_boost', 'retry_failed_items']:
+                update_fields.append(f'{key} = ?')
+                update_values.append(value)
+        
+        if update_fields:
+            update_fields.append('updated_at = CURRENT_TIMESTAMP')
+            update_values.append(1)  # WHERE id = 1
+            
+            cursor.execute(f'''
+                UPDATE queue_config 
+                SET {', '.join(update_fields)}
+                WHERE id = ?
+            ''', update_values)
+            
+            self.conn.commit()
+    
+    def increment_queue_attempts(self, queue_id: int) -> int:
+        """Increment attempt count for queue item"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            UPDATE story_queue 
+            SET attempts = attempts + 1
+            WHERE id = ?
+        ''', (queue_id,))
+        
+        cursor.execute('SELECT attempts FROM story_queue WHERE id = ?', (queue_id,))
+        result = cursor.fetchone()
+        self.conn.commit()
+        
+        return result[0] if result else 0

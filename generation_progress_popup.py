@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Callable, Optional
 from config import estimate_step_time, estimate_total_time, format_time_estimate
 
+
 class GenerationProgressWindow:
     """Dynamic progress window for story generation"""
     
@@ -678,8 +679,17 @@ class GenerationProgressWindow:
     
     def update_overall_progress(self):
         """Update the overall progress bar and time estimates"""
+        # Calculate overall progress based on individual step progress
+        total_progress = 0
+        for step_data in self.step_progress.values():
+            if step_data['status'] == 'completed':
+                total_progress += 100
+            elif step_data['status'] == 'processing':
+                total_progress += step_data.get('progress', 0)
+            # pending steps contribute 0
+        
+        overall_progress = total_progress / self.total_steps if self.total_steps > 0 else 0
         completed_steps = sum(1 for step in self.step_progress.values() if step['status'] == 'completed')
-        overall_progress = (completed_steps / self.total_steps) * 100
         
         self.overall_progress['value'] = overall_progress
         
@@ -917,9 +927,18 @@ class GenerationProgressWindow:
     
     def create_shot_card(self, shot, index: int):
         """Create a shot card for the storyboard"""
+        # Handle both dict and object formats
+        def get_attr(obj, attr, default=None):
+            if isinstance(obj, dict):
+                return obj.get(attr, default)
+            else:
+                return getattr(obj, attr, default)
+        
+        shot_number = get_attr(shot, 'shot_number', index + 1)
+        
         # Create shot card frame in vertical layout
         card_frame = ttk.LabelFrame(self.storyboard_scrollable_frame, 
-                                   text=f"Shot {shot.shot_number}", 
+                                   text=f"Shot {shot_number}", 
                                    padding="10")
         card_frame.pack(fill='x', padx=5, pady=5)
         
@@ -938,9 +957,12 @@ class GenerationProgressWindow:
         details_frame.pack(fill='x')
         
         # Duration and camera info (single line)
-        info_text = f"Duration: {shot.duration}s"
-        if hasattr(shot, 'camera') and shot.camera:
-            info_text += f" • {shot.camera}"
+        duration = get_attr(shot, 'duration', '0')
+        camera = get_attr(shot, 'camera', '')
+        
+        info_text = f"Duration: {duration}s"
+        if camera:
+            info_text += f" • {camera}"
         
         ttk.Label(details_frame, text=info_text, 
                  font=('Arial', 8), foreground='gray').pack(anchor='w')
@@ -955,7 +977,7 @@ class GenerationProgressWindow:
         
         # Insert description
         description_text.config(state='normal')
-        description = getattr(shot, 'description', 'No description available')
+        description = get_attr(shot, 'description', 'No description available')
         description_text.insert(tk.END, description)
         description_text.config(state='disabled')
         
@@ -982,7 +1004,7 @@ class GenerationProgressWindow:
         negative_prompt_text.pack(fill='x', pady=(2, 5))
         
         # Fill with prompt data or pending state
-        wan_prompt = getattr(shot, 'wan_prompt', '')
+        wan_prompt = get_attr(shot, 'wan_prompt', '')
         if wan_prompt and wan_prompt.strip():
             # Parse positive/negative from wan_prompt
             positive, negative = self._parse_wan_prompt(wan_prompt)
@@ -1013,7 +1035,7 @@ class GenerationProgressWindow:
         ttk.Label(status_frame, text=f"{prompt_status} Prompt", font=('Arial', 8)).pack(side='left')
         
         # Narration status  
-        narration_status = "✅" if getattr(shot, 'narration', None) else "⏳"
+        narration_status = "✅" if get_attr(shot, 'narration', None) else "⏳"
         ttk.Label(status_frame, text=f"{narration_status} Audio", font=('Arial', 8)).pack(side='right')
         
         # Progress bar at bottom
@@ -1022,7 +1044,7 @@ class GenerationProgressWindow:
         render_progress['value'] = 0
         
         # Store card references
-        self.shot_cards[shot.shot_number] = {
+        self.shot_cards[shot_number] = {
             'frame': card_frame,
             'progress': render_progress,
             'preview': preview_placeholder,

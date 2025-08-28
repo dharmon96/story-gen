@@ -280,6 +280,13 @@ EXAMPLE:
 Positive: young woman walking through dark hallway, worried expression, dramatic side lighting casting long shadows on walls, cinematic atmosphere, photorealistic style, medium shot, sharp focus, high detail
 Negative: text, watermark, blurry, distorted, extra limbs, low quality, bad anatomy
 
+CHARACTER CONSISTENCY RULES (PRIORITY):
+- If character descriptions are provided, incorporate them precisely into the positive prompt
+- Use exact physical descriptions: age, hair color/style, clothing, distinctive features
+- Maintain character appearance consistency across all shots they appear in
+- Character descriptions should come FIRST in the positive prompt before scene elements
+- Format: [character description] [action/scene] [lighting/mood] [technical quality]
+
 CREATIVE VISUAL RULES:
 - Analyze the shot description and camera direction to create the best possible visual
 - Add compelling lighting: dramatic shadows, warm/cool tones, contrast, atmosphere

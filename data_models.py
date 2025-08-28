@@ -95,3 +95,33 @@ class VisualStyle:
     color_palette: str
     cinematography: str
     era_setting: str
+
+@dataclass
+class QueueItem:
+    """Story queue item"""
+    id: Optional[int]
+    queue_position: int
+    story_config: StoryConfig
+    priority: int = 5
+    status: str = 'queued'
+    current_step: str = 'pending'
+    progress_data: Optional[dict] = None
+    story_id: Optional[str] = None
+    continuous_generation: bool = False
+    error_message: Optional[str] = None
+    attempts: int = 0
+    max_attempts: int = 3
+    created_at: Optional[str] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    estimated_completion: Optional[str] = None
+
+@dataclass
+class QueueConfig:
+    """Queue configuration settings"""
+    continuous_enabled: bool = False
+    render_queue_high_threshold: int = 50
+    render_queue_low_threshold: int = 10
+    max_concurrent_generations: int = 1
+    auto_priority_boost: bool = True
+    retry_failed_items: bool = True
