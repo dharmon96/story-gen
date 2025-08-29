@@ -9,7 +9,7 @@ import json
 import os
 from typing import Dict, Any
 
-from config import API_SETTINGS, SYSTEM_PROMPT_PRESETS, ACTIVE_PRESET
+from config import API_SETTINGS, SYSTEM_PROMPT_PRESETS, ACTIVE_PRESET, DB_DIR
 
 
 class SettingsDialog:
@@ -18,8 +18,8 @@ class SettingsDialog:
     def __init__(self, parent, database_manager=None):
         self.parent = parent
         self.db = database_manager
-        self.settings_file = "user_settings.json"
-        self.presets_file = "custom_presets.json"
+        self.settings_file = os.path.join(DB_DIR, "user_settings.json")
+        self.presets_file = os.path.join(DB_DIR, "custom_presets.json")
         
         # Load saved settings
         self.api_settings = self.load_api_settings()
@@ -264,6 +264,9 @@ class SettingsDialog:
     def save_api_settings(self):
         """Save API settings to file"""
         try:
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(self.settings_file), exist_ok=True)
+            
             with open(self.settings_file, 'w') as f:
                 json.dump(self.api_settings, f, indent=2)
         except Exception as e:
@@ -272,6 +275,9 @@ class SettingsDialog:
     def save_custom_presets(self):
         """Save custom presets to file"""
         try:
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(self.presets_file), exist_ok=True)
+            
             with open(self.presets_file, 'w') as f:
                 json.dump(self.custom_presets, f, indent=2)
         except Exception as e:

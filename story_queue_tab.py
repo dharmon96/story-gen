@@ -18,11 +18,12 @@ class StoryQueueTab:
     """GUI component for story queue management"""
     
     def __init__(self, parent_frame, story_queue: StoryQueue, 
-                 story_generator=None, db_manager=None):
+                 story_generator=None, db_manager=None, main_app=None):
         self.parent_frame = parent_frame
         self.story_queue = story_queue
         self.story_generator = story_generator
         self.db = db_manager
+        self.main_app = main_app
         
         # Progress windows for each queue item
         self.progress_windows = {}
@@ -345,6 +346,8 @@ class StoryQueueTab:
                 
         except Exception as e:
             print(f"Error refreshing queue display: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _add_queue_item_to_tree(self, item: Dict):
         """Add a queue item to the treeview"""
@@ -412,6 +415,8 @@ class StoryQueueTab:
             
         except Exception as e:
             print(f"Error adding queue item to tree: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _format_time(self, time_str: str) -> str:
         """Format timestamp for display"""
@@ -513,7 +518,7 @@ class StoryQueueTab:
                     del self.progress_windows[item_id]
             
             # The GenerationProgressWindow now creates the window automatically in __init__
-            progress_window = GenerationProgressWindow(parent, story_config, on_complete_callback=on_window_close)
+            progress_window = GenerationProgressWindow(parent, story_config, on_complete_callback=on_window_close, db_manager=self.db)
             
             # Store reference
             item_id = queue_item['id']
@@ -822,8 +827,8 @@ class StoryQueueTab:
                 except:
                     pass  # Ignore node info errors
         
-        # Schedule refresh of main display
-        self.parent_frame.after(100, self.refresh_queue_display)
+        # Schedule immediate refresh of main display to show progress updates
+        self.parent_frame.after(10, self.refresh_queue_display)
     
     def on_queue_completion(self, queue_id: int, story_data: Dict):
         """Handle queue item completion"""
@@ -849,8 +854,27 @@ class StoryQueueTab:
                 window.update_shot_list(shots)
                 window.add_ai_message('success', f"Created {len(shots)} shots for the story", 'shots')
         
-        # Refresh display
-        self.parent_frame.after(100, self.refresh_queue_display)
+        # Refresh display immediately
+        self.parent_frame.after(10, self.refresh_queue_display)
+        
+        # Check if this was the last item in queue and auto-randomize for next generation
+        self.parent_frame.after(50, self._maybe_auto_randomize_after_completion)
+    
+    def _maybe_auto_randomize_after_completion(self):
+        """Auto-randomize inputs if queue is now empty"""
+        try:
+            # Check if there are any more queued items
+            queue_stats = self.story_queue.get_queue_statistics()
+            queued_count = queue_stats.get('queued', 0)
+            processing_count = queue_stats.get('processing', 0)
+            
+            # If no items are queued or processing, randomize for next generation
+            if queued_count == 0 and processing_count == 0:
+                if self.main_app and hasattr(self.main_app, 'randomize_inputs'):
+                    self.main_app.randomize_inputs()
+                    self.main_app.add_log("Auto-randomized settings after queue completion", "Info")
+        except Exception as e:
+            print(f"Error in auto-randomization: {e}")
     
     def on_queue_error(self, error_message: str):
         """Handle queue errors"""
@@ -860,7 +884,7 @@ class StoryQueueTab:
     def start_auto_refresh(self):
         """Start automatic refresh timer"""
         self.refresh_queue_display()
-        self.refresh_timer = self.parent_frame.after(5000, self.start_auto_refresh)  # Refresh every 5 seconds
+        self.refresh_timer = self.parent_frame.after(2000, self.start_auto_refresh)  # Refresh every 2 seconds for better responsiveness
     
     def stop_auto_refresh(self):
         """Stop automatic refresh timer"""

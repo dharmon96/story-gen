@@ -7,7 +7,8 @@ import sqlite3
 import json
 from typing import List, Dict, Optional, Any
 from dataclasses import asdict
-from config import DB_PATH
+from datetime import datetime, timedelta
+from config import DB_PATH, estimate_total_time
 from data_models import StoryConfig, Shot
 
 def init_database():
@@ -315,6 +316,25 @@ def init_database():
         cursor.execute('''
             INSERT OR IGNORE INTO queue_config (id) VALUES (1)
         ''')
+        
+        # AI chat messages table - Store conversation history
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS ai_chat_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                story_id TEXT NOT NULL,
+                message_type TEXT NOT NULL,
+                content TEXT NOT NULL,
+                step TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (story_id) REFERENCES stories (id)
+            )
+        ''')
+        
+        # Clean up any corrupted JSON data on startup
+        try:
+            self.cleanup_corrupted_json()
+        except Exception as e:
+            print(f"Warning: Could not clean up corrupted JSON data: {e}")
 
         # Performance summary view
         cursor.execute('''
@@ -368,6 +388,8 @@ class DatabaseManager:
         self.conn = None
         self.connect()
         self._run_migrations()
+        # Clean up any corrupted JSON data on startup
+        self.cleanup_corrupted_json()
     
     def connect(self):
         """Establish database connection"""
@@ -1094,11 +1116,14 @@ class DatabaseManager:
         max_pos = cursor.fetchone()[0]
         next_position = (max_pos or 0) + 1
         
+        # Calculate initial ETA based on queue position and average processing time
+        estimated_completion = self._calculate_eta_for_queue_item(priority, next_position, story_config)
+        
         cursor.execute('''
             INSERT INTO story_queue (
-                queue_position, story_config, priority, continuous_generation, current_step
-            ) VALUES (?, ?, ?, ?, ?)
-        ''', (next_position, json.dumps(story_config), priority, continuous, 'pending'))
+                queue_position, story_config, priority, continuous_generation, current_step, estimated_completion
+            ) VALUES (?, ?, ?, ?, ?, ?)
+        ''', (next_position, json.dumps(story_config), priority, continuous, 'pending', estimated_completion))
         
         self.conn.commit()
         return cursor.lastrowid
@@ -1123,7 +1148,9 @@ class DatabaseManager:
     def update_queue_item_status(self, queue_id: int, status: str, current_step: str = None, 
                                 progress_data: Dict = None, story_id: str = None, error: str = None):
         """Update queue item status and progress"""
+        # Use a transaction to prevent corruption from concurrent updates
         cursor = self.conn.cursor()
+        cursor.execute('BEGIN IMMEDIATE TRANSACTION')
         
         update_fields = ['status = ?']
         update_values = [status]
@@ -1134,7 +1161,13 @@ class DatabaseManager:
         
         if progress_data:
             update_fields.append('progress_data = ?')
-            update_values.append(json.dumps(progress_data))
+            try:
+                json_data = json.dumps(progress_data)
+                update_values.append(json_data)
+            except (TypeError, ValueError) as e:
+                print(f"Warning: Failed to serialize progress_data for queue item {queue_id}: {e}")
+                print(f"Progress data: {progress_data}")
+                update_values.append('{}')  # Fallback to empty JSON
         
         if story_id:
             update_fields.append('story_id = ?')
@@ -1146,18 +1179,29 @@ class DatabaseManager:
         
         if status == 'processing':
             update_fields.append('started_at = CURRENT_TIMESTAMP')
+            # Update ETA when processing starts
+            eta = self._calculate_processing_eta(queue_id, progress_data)
+            if eta:
+                update_fields.append('estimated_completion = ?')
+                update_values.insert(-1, eta)  # Insert before queue_id
         elif status in ['completed', 'failed']:
             update_fields.append('completed_at = CURRENT_TIMESTAMP')
+            update_fields.append('estimated_completion = NULL')
         
         update_values.append(queue_id)
         
-        cursor.execute(f'''
-            UPDATE story_queue 
-            SET {', '.join(update_fields)}
-            WHERE id = ?
-        ''', update_values)
-        
-        self.conn.commit()
+        try:
+            cursor.execute(f'''
+                UPDATE story_queue 
+                SET {', '.join(update_fields)}
+                WHERE id = ?
+            ''', update_values)
+            
+            self.conn.commit()
+        except Exception as e:
+            self.conn.rollback()
+            print(f"Error updating queue item {queue_id}: {e}")
+            raise
     
     def get_queue_items(self, status: str = None, limit: int = None) -> List[Dict]:
         """Get queue items, optionally filtered by status"""
@@ -1179,10 +1223,37 @@ class DatabaseManager:
         cursor.execute(query, params)
         
         items = []
-        for row in cursor.fetchall():
+        rows = cursor.fetchall()
+        for row in rows:
             item = dict(row)
-            item['story_config'] = json.loads(item['story_config'])
-            item['progress_data'] = json.loads(item['progress_data']) if item['progress_data'] else {}
+            
+            try:
+                item['story_config'] = json.loads(item['story_config'])
+            except json.JSONDecodeError as e:
+                print(f"WARNING: Invalid JSON in story_config for item {item.get('id')}: {e}")
+                item['story_config'] = {}
+            
+            try:
+                if item['progress_data'] and item['progress_data'].strip():
+                    # Check if it looks like valid JSON before parsing
+                    progress_str = item['progress_data'].strip()
+                    if progress_str.startswith('{') and progress_str.endswith('}'):
+                        item['progress_data'] = json.loads(progress_str)
+                    else:
+                        print(f"WARNING: Invalid JSON format in progress_data for item {item.get('id')}: {progress_str[:50]}...")
+                        item['progress_data'] = {}
+                        # Clean up the corrupted data
+                        self.conn.execute('UPDATE story_queue SET progress_data = ? WHERE id = ?', ('{}', item.get('id')))
+                        self.conn.commit()
+                else:
+                    item['progress_data'] = {}
+            except json.JSONDecodeError as e:
+                print(f"WARNING: Invalid JSON in progress_data for item {item.get('id')}: {e}")
+                item['progress_data'] = {}
+                # Clean up the corrupted data
+                self.conn.execute('UPDATE story_queue SET progress_data = ? WHERE id = ?', ('{}', item.get('id')))
+                self.conn.commit()
+            
             items.append(item)
         
         return items
@@ -1318,3 +1389,178 @@ class DatabaseManager:
         self.conn.commit()
         
         return result[0] if result else 0
+    
+    def cleanup_corrupted_json(self):
+        """Clean up corrupted JSON data in queue items"""
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT id, progress_data FROM story_queue WHERE progress_data IS NOT NULL AND progress_data != ""')
+        rows = cursor.fetchall()
+        
+        corrupted_items = []
+        for row in rows:
+            item_id, progress_data = row
+            try:
+                json.loads(progress_data)
+            except json.JSONDecodeError:
+                corrupted_items.append(item_id)
+        
+        if corrupted_items:
+            print(f"Found {len(corrupted_items)} corrupted progress_data entries, cleaning up...")
+            cursor.execute(f'UPDATE story_queue SET progress_data = "{{}}" WHERE id IN ({",".join("?" * len(corrupted_items))})', corrupted_items)
+            self.conn.commit()
+            print(f"Cleaned up corrupted progress_data for items: {corrupted_items}")
+            return len(corrupted_items)
+        
+        return 0
+    
+    def _calculate_eta_for_queue_item(self, priority: int, queue_position: int, story_config: Dict) -> str:
+        """Calculate estimated completion time for a new queue item"""
+        try:
+            # Get current time
+            now = datetime.now()
+            
+            # Estimate how long this story will take to generate
+            story_time = estimate_total_time(story_config)
+            
+            # Get average processing time from completed items (last 10)
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                SELECT 
+                    AVG((julianday(completed_at) - julianday(started_at)) * 24 * 60 * 60) as avg_seconds
+                FROM story_queue 
+                WHERE status = 'completed' AND started_at IS NOT NULL AND completed_at IS NOT NULL
+                ORDER BY completed_at DESC LIMIT 10
+            ''')
+            result = cursor.fetchone()
+            avg_processing_time = result[0] if result[0] else story_time
+            
+            # Calculate queue delay based on items ahead with higher/equal priority
+            cursor.execute('''
+                SELECT COUNT(*) FROM story_queue 
+                WHERE status IN ('queued', 'processing') 
+                AND (priority > ? OR (priority = ? AND queue_position < ?))
+            ''', (priority, priority, queue_position))
+            items_ahead = cursor.fetchone()[0] or 0
+            
+            # Calculate ETA
+            queue_delay = items_ahead * avg_processing_time
+            total_delay = queue_delay + story_time
+            eta = now + timedelta(seconds=total_delay)
+            
+            return eta.strftime('%Y-%m-%d %H:%M:%S')
+            
+        except Exception as e:
+            print(f"Error calculating ETA: {e}")
+            # Fallback: use story time estimate only
+            return (datetime.now() + timedelta(seconds=story_time)).strftime('%Y-%m-%d %H:%M:%S')
+    
+    def _calculate_processing_eta(self, queue_id: int, progress_data: Dict) -> Optional[str]:
+        """Calculate ETA for an item that just started processing"""
+        try:
+            # Get the queue item
+            cursor = self.conn.cursor()
+            cursor.execute('SELECT story_config, started_at FROM story_queue WHERE id = ?', (queue_id,))
+            result = cursor.fetchone()
+            if not result:
+                return None
+            
+            story_config = json.loads(result[0])
+            started_at_str = result[1]
+            
+            if not started_at_str:
+                return None
+            
+            # Parse started time
+            started_at = datetime.strptime(started_at_str, '%Y-%m-%d %H:%M:%S')
+            
+            # Get progress percentage
+            progress = progress_data.get('progress', 0) if progress_data else 0
+            
+            # Estimate total time for this story
+            total_time = estimate_total_time(story_config)
+            
+            if progress > 0:
+                # Calculate remaining time based on current progress
+                elapsed = (datetime.now() - started_at).total_seconds()
+                estimated_total = (elapsed / progress) * 100 if progress > 0 else total_time
+                remaining = max(0, estimated_total - elapsed)
+            else:
+                # Use default estimate
+                remaining = total_time
+            
+            eta = datetime.now() + timedelta(seconds=remaining)
+            return eta.strftime('%Y-%m-%d %H:%M:%S')
+            
+        except Exception as e:
+            print(f"Error calculating processing ETA: {e}")
+            return None
+    
+    def get_shots_by_story_id(self, story_id: str) -> List[Dict]:
+        """Get all shots for a specific story"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT id, shot_number, story_id, description, duration, frames,
+                   wan_prompt, narration, music_cue, status, camera, created_at
+            FROM shots 
+            WHERE story_id = ?
+            ORDER BY shot_number
+        ''', (story_id,))
+        
+        rows = cursor.fetchall()
+        shots = []
+        for row in rows:
+            shot_dict = {
+                'id': row[0],
+                'shot_number': row[1],
+                'story_id': row[2],
+                'description': row[3],
+                'duration': row[4],
+                'frames': row[5],
+                'wan_prompt': row[6] or '',
+                'narration': row[7] or '',
+                'music_cue': row[8] or '',
+                'status': row[9] or 'pending',
+                'camera': row[10] or '',
+                'created_at': row[11]
+            }
+            shots.append(shot_dict)
+        return shots
+    
+    def save_ai_chat_message(self, story_id: str, message_type: str, content: str, step: str = None):
+        """Save AI chat message to database"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            INSERT INTO ai_chat_messages (story_id, message_type, content, step)
+            VALUES (?, ?, ?, ?)
+        ''', (story_id, message_type, content, step))
+        self.conn.commit()
+        return cursor.lastrowid
+    
+    def get_ai_chat_messages(self, story_id: str) -> List[Dict]:
+        """Get all AI chat messages for a story"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT message_type, content, step, timestamp
+            FROM ai_chat_messages 
+            WHERE story_id = ?
+            ORDER BY timestamp ASC
+        ''', (story_id,))
+        
+        rows = cursor.fetchall()
+        messages = []
+        for row in rows:
+            message_dict = {
+                'message_type': row[0],
+                'content': row[1],
+                'step': row[2] or '',
+                'timestamp': row[3]
+            }
+            messages.append(message_dict)
+        return messages
+    
+    def clear_ai_chat_messages(self, story_id: str):
+        """Clear all AI chat messages for a story"""
+        cursor = self.conn.cursor()
+        cursor.execute('DELETE FROM ai_chat_messages WHERE story_id = ?', (story_id,))
+        self.conn.commit()
+        return cursor.rowcount

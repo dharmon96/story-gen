@@ -15,15 +15,15 @@ from config import estimate_step_time, estimate_total_time, format_time_estimate
 class GenerationProgressWindow:
     """Dynamic progress window for story generation"""
     
-    def __init__(self, parent, config, on_complete_callback: Optional[Callable] = None):
+    def __init__(self, parent, config, on_complete_callback: Optional[Callable] = None, db_manager=None):
         self.parent = parent
         self.config = config
         self.on_complete_callback = on_complete_callback
+        self.db_manager = db_manager
         
         # Window state
         self.window = None
         self.is_open = False
-        self.auto_close_after = None
         
         # Progress tracking
         self.story_title = "Generating..."
@@ -31,6 +31,9 @@ class GenerationProgressWindow:
         self.steps_completed = 0
         self.total_steps = 8  # Story, Shots, Characters, Style, Prompts, Narration, Music, Queue
         self.step_progress = {}
+        
+        # Chat history tracking
+        self.current_story_id = None
         
         # Time tracking
         self.generation_start_time = datetime.now()
@@ -54,6 +57,12 @@ class GenerationProgressWindow:
         
         # Initialize time estimates (delay to ensure UI is ready)
         self.window.after(100, self.initialize_time_estimates)
+        
+        # Load existing content if opening mid-generation (delay more to ensure DB is ready)
+        self.window.after(300, self.load_existing_content)
+        
+        # Force refresh of all content after UI is fully initialized
+        self.window.after(500, self.force_refresh_all_content)
         
         # Start periodic time updates
         self.start_periodic_updates()
@@ -262,6 +271,9 @@ class GenerationProgressWindow:
         self.content_notebook = ttk.Notebook(parent)
         self.content_notebook.pack(fill='both', expand=True)
         
+        # Bind tab selection to refresh content
+        self.content_notebook.bind('<<NotebookTabChanged>>', self.on_tab_changed)
+        
         # Tab 1: Story Content
         self.setup_story_tab()
         
@@ -359,13 +371,13 @@ class GenerationProgressWindow:
         self.style_canvas.bind("<MouseWheel>", _on_style_mousewheel)
         self.style_scrollable_frame.bind("<MouseWheel>", _on_style_mousewheel)
         
-        # Initial placeholder
-        placeholder_frame = ttk.Frame(self.style_scrollable_frame)
-        placeholder_frame.pack(fill='x', pady=20)
+        # Store initial placeholder for later clearing
+        self.style_placeholder_frame = ttk.Frame(self.style_scrollable_frame)
+        self.style_placeholder_frame.pack(fill='x', pady=20)
         
-        ttk.Label(placeholder_frame, text="Character and style references will appear here", 
+        ttk.Label(self.style_placeholder_frame, text="Character and style references will appear here", 
                  foreground='gray').pack()
-        ttk.Label(placeholder_frame, text="Generated after story analysis completes", 
+        ttk.Label(self.style_placeholder_frame, text="Generated after story analysis completes", 
                  foreground='gray', font=('Arial', 9, 'italic')).pack(pady=5)
     
     def setup_storyboard_tab(self):
@@ -380,6 +392,9 @@ class GenerationProgressWindow:
         self.shot_count_label = ttk.Label(header_frame, text="No shots generated yet", 
                                         font=('Arial', 12, 'bold'))
         self.shot_count_label.pack(anchor='w')
+        
+        # Store reference to header for placeholder management
+        self.storyboard_header_frame = header_frame
         
         # Scrollable storyboard container
         canvas_frame = ttk.Frame(storyboard_frame)
@@ -417,6 +432,175 @@ class GenerationProgressWindow:
         
         # Store shot cards for updates
         self.shot_cards = {}
+    
+    def on_tab_changed(self, event):
+        """Handle tab change events to refresh content"""
+        if not self.db_manager:
+            return
+            
+        selected_tab = self.content_notebook.select()
+        tab_text = self.content_notebook.tab(selected_tab, "text")
+        
+        # Refresh content when switching to tabs that might have been updated
+        if "🎬 Shot List" in tab_text:
+            self.refresh_shot_list_content()
+        elif "🎨 Style Refs" in tab_text:
+            self.refresh_style_references_content()
+        elif "🤖 AI Chat" in tab_text:
+            self.refresh_ai_chat_content()
+    
+    def refresh_shot_list_content(self):
+        """Refresh shot list content from database"""
+        try:
+            # Get most recent story
+            recent_stories = self.db_manager.get_recent_stories(limit=1)
+            if recent_stories:
+                story_id = recent_stories[0]['id']
+                shots = self.db_manager.get_shots_by_story_id(story_id)
+                if shots:
+                    # update_shot_list will handle prompts during card creation
+                    self.update_shot_list(shots)
+        except Exception as e:
+            print(f"Error refreshing shot list: {e}")
+    
+    def refresh_style_references_content(self):
+        """Refresh style references content from database"""
+        try:
+            # Get most recent story
+            recent_stories = self.db_manager.get_recent_stories(limit=1)
+            if recent_stories:
+                story_id = recent_stories[0]['id']
+                characters = self.db_manager.get_story_characters(story_id)
+                locations = self.db_manager.get_story_locations(story_id)
+                
+                if characters or locations:
+                    # Create a basic visual style dict
+                    visual_style = {
+                        'overall_mood': 'Generated', 
+                        'characters': len(characters), 
+                        'locations': len(locations)
+                    }
+                    self.update_style_references(characters, locations, visual_style)
+        except Exception as e:
+            print(f"Error refreshing style references: {e}")
+    
+    def refresh_ai_chat_content(self):
+        """Refresh AI chat content from database"""
+        try:
+            if self.current_story_id:
+                self.load_ai_chat_history(self.current_story_id)
+            else:
+                # Try to get current story ID
+                recent_stories = self.db_manager.get_recent_stories(limit=1)
+                if recent_stories:
+                    story_id = recent_stories[0]['id']
+                    self.current_story_id = story_id
+                    self.load_ai_chat_history(story_id)
+        except Exception as e:
+            print(f"Error refreshing AI chat content: {e}")
+    
+    def force_refresh_all_content(self):
+        """Force refresh all content tabs after UI is fully initialized"""
+        if not self.db_manager:
+            return
+            
+        try:
+            # Force refresh shot list regardless of active tab
+            recent_stories = self.db_manager.get_recent_stories(limit=1)
+            if recent_stories:
+                story_id = recent_stories[0]['id']
+                shots = self.db_manager.get_shots_by_story_id(story_id)
+                if shots:
+                    # update_shot_list will handle prompts during card creation
+                    self.update_shot_list(shots)
+                
+                # Force refresh style references
+                characters = self.db_manager.get_story_characters(story_id)
+                locations = self.db_manager.get_story_locations(story_id)
+                if characters or locations:
+                    visual_style = {'overall_mood': 'Generated', 'characters': len(characters), 'locations': len(locations)}
+                    self.update_style_references(characters, locations, visual_style)
+                
+                # Load AI chat history  
+                self.current_story_id = story_id
+                self.load_ai_chat_history(story_id)
+        except Exception as e:
+            print(f"Error in force refresh: {e}")
+    
+    def load_ai_chat_history(self, story_id: str):
+        """Load existing AI chat messages for a story"""
+        if not self.db_manager or not hasattr(self, 'ai_chat'):
+            return
+            
+        try:
+            messages = self.db_manager.get_ai_chat_messages(story_id)
+            if messages:
+                # Clear current chat content
+                self.ai_chat.config(state='normal')
+                self.ai_chat.delete('1.0', tk.END)
+                
+                # Add historical messages
+                for message in messages:
+                    self.display_historical_message(message)
+                
+                self.ai_chat.config(state='disabled')
+                self.ai_chat.see(tk.END)
+                
+        except Exception as e:
+            print(f"Error loading AI chat history: {e}")
+    
+    def display_historical_message(self, message_data: dict):
+        """Display a historical AI message with proper formatting"""
+        try:
+            message_type = message_data['message_type']
+            content = message_data['content']
+            step = message_data['step']
+            timestamp_str = message_data['timestamp']
+            
+            # Parse timestamp and format it
+            from datetime import datetime
+            try:
+                # Try parsing with full timestamp format first
+                timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                time_display = timestamp.strftime("%H:%M:%S")
+            except:
+                # Fallback to simple time display
+                time_display = timestamp_str[-8:] if len(timestamp_str) >= 8 else "--:--:--"
+            
+            # Add to chat display using existing formatting logic
+            self.ai_chat.insert(tk.END, f"[{time_display}] ", 'timestamp')
+            
+            # Add step indicator if provided
+            if step:
+                self.ai_chat.insert(tk.END, f"[{step.upper()}] ", 'system')
+            
+            # Add message based on type
+            if message_type == 'request':
+                self.ai_chat.insert(tk.END, "🤖 AI Request: ", 'ai_request')
+                self.ai_chat.insert(tk.END, f"{content}\n\n", 'ai_request')
+            elif message_type == 'response':
+                # Parse response for <think> tags
+                think_content, actual_content = self.parse_ai_response(content)
+                
+                if think_content:
+                    # Display thinking process
+                    self.ai_chat.insert(tk.END, "🧠 AI Thinking: ", 'ai_think')
+                    self.ai_chat.insert(tk.END, f"{think_content}\n\n", 'ai_think')
+                
+                # Display actual response
+                self.ai_chat.insert(tk.END, "💬 AI Response: ", 'ai_response')
+                self.ai_chat.insert(tk.END, f"{actual_content}\n\n", 'ai_response')
+            elif message_type == 'error':
+                self.ai_chat.insert(tk.END, "❌ Error: ", 'error')
+                self.ai_chat.insert(tk.END, f"{content}\n\n", 'error')
+            elif message_type == 'success':
+                self.ai_chat.insert(tk.END, "✅ Success: ", 'success')
+                self.ai_chat.insert(tk.END, f"{content}\n\n", 'success')
+            else:
+                self.ai_chat.insert(tk.END, f"{content}\n\n")
+            
+        except Exception as e:
+            print(f"Error displaying historical message: {e}")
     
     def setup_ai_chat_tab(self):
         """Setup AI chat tab (for debugging)"""
@@ -707,8 +891,7 @@ class GenerationProgressWindow:
                 self.remaining_time_label.config(text=f"Remaining: {format_time_estimate(remaining)}")
         
         if completed_steps == self.total_steps:
-            self.overall_status.config(text="✅ Generation Complete! Auto-closing in 10 seconds...")
-            self.schedule_auto_close()
+            self.overall_status.config(text="✅ Generation Complete!")
         else:
             processing_step = next((k for k, v in self.step_progress.items() if v['status'] == 'processing'), None)
             if processing_step:
@@ -761,6 +944,13 @@ class GenerationProgressWindow:
         """Add full message to AI chat section with <think> tag handling"""
         if not self.is_open:
             return
+        
+        # Save message to database if we have a story ID
+        if self.current_story_id and self.db_manager:
+            try:
+                self.db_manager.save_ai_chat_message(self.current_story_id, message_type, content, step)
+            except Exception as e:
+                print(f"Warning: Could not save AI message to database: {e}")
         
         def add_message():
             self.ai_chat.config(state='normal')
@@ -822,23 +1012,114 @@ class GenerationProgressWindow:
         if self.window:
             self.window.after(0, update_title)
     
-    def schedule_auto_close(self):
-        """Schedule window to auto-close after 10 seconds"""
-        if self.auto_close_after:
-            return  # Already scheduled
-        
-        def countdown(seconds):
-            if not self.is_open:
-                return
+    
+    def load_existing_content(self):
+        """Load existing content when popup is opened mid-generation"""
+        if not self.db_manager:
+            return
             
-            if seconds > 0:
-                self.overall_status.config(text=f"✅ Generation Complete! Auto-closing in {seconds} seconds...")
-                self.window.after(1000, lambda: countdown(seconds - 1))
-            else:
-                self.close()
+        try:
+            # Get the most recent story that might be in progress
+            recent_stories = self.db_manager.get_recent_stories(limit=1)
+            if not recent_stories:
+                return
+                
+            story_data = recent_stories[0]
+            story_id = story_data['id']
+            
+            # Load and display story content
+            if story_data:
+                # Convert database dict to format expected by update methods
+                story_dict = {
+                    'title': story_data.get('title', 'Untitled Story'),
+                    'content': story_data.get('content', ''),
+                    'full_story': story_data.get('content', ''),
+                    'duration': story_data.get('duration', 'Unknown duration'),
+                    'genre': story_data.get('genre', 'Unknown')
+                }
+                self.update_story_content(story_dict)
+                
+                # Update window title with story title
+                if story_dict['title'] != 'Untitled Story':
+                    self.update_story_title(story_dict['title'])
+                
+                # Set current story ID for chat message saving
+                self.current_story_id = story_id
+            
+            # Load and display shots if they exist
+            shots = self.db_manager.get_shots_by_story_id(story_id)
+            if shots:
+                # update_shot_list will handle prompts during card creation
+                self.update_shot_list(shots)
+            
+            # Load and display character/style references if they exist
+            characters = self.db_manager.get_story_characters(story_id)
+            locations = self.db_manager.get_story_locations(story_id)
+            
+            if characters or locations:
+                # Create a basic visual style dict for consistency
+                visual_style = {'overall_mood': 'Generated', 'characters': len(characters), 'locations': len(locations)}
+                self.update_style_references(characters, locations, visual_style)
+            
+            # Try to determine current progress state from story status
+            story_status = story_data.get('status', 'pending')
+            if story_status == 'ready':
+                # Story is complete - set all progress bars to complete
+                self.set_completed_state()
+            elif story_status == 'generating':
+                # Story is in progress - try to determine current step
+                self.estimate_current_progress(story_data, shots, characters)
+                        
+        except Exception as e:
+            print(f"Error loading existing content: {e}")
+    
+    def set_completed_state(self):
+        """Set all progress bars to completed state"""
+        steps = ['story', 'shots', 'characters', 'style', 'prompts', 'narration', 'music', 'queue']
+        for step in steps:
+            self.update_step(step, 100, 'completed', f'{step.title()} generation complete')
+    
+    def estimate_current_progress(self, story_data, shots, characters):
+        """Estimate current progress based on available data"""
+        # Story exists, so mark as complete
+        self.update_step('story', 100, 'completed', f'Story: {story_data.get("title", "Untitled")}')
         
-        self.auto_close_after = True
-        countdown(10)
+        # If shots exist, mark shots as complete
+        if shots:
+            self.update_step('shots', 100, 'completed', f'{len(shots)} shots created')
+            
+            # If characters exist, mark character analysis as complete
+            if characters:
+                self.update_step('characters', 100, 'completed', f'{len(characters)} characters analyzed')
+            
+            # Check shot completion status
+            shots_with_prompts = sum(1 for shot in shots if shot.get('wan_prompt', '').strip())
+            shots_with_narration = sum(1 for shot in shots if shot.get('narration', '').strip())
+            shots_with_music = sum(1 for shot in shots if shot.get('music_cue', '').strip())
+            
+            total_shots = len(shots)
+            if shots_with_prompts == total_shots:
+                self.update_step('prompts', 100, 'completed', f'{total_shots} visual prompts generated')
+            elif shots_with_prompts > 0:
+                progress = int((shots_with_prompts / total_shots) * 100)
+                self.update_step('prompts', progress, 'processing', f'{shots_with_prompts}/{total_shots} shots have prompts')
+            
+            if shots_with_narration > 0:
+                if shots_with_narration == total_shots:
+                    self.update_step('narration', 100, 'completed', f'{total_shots} narration scripts created')
+                else:
+                    progress = int((shots_with_narration / total_shots) * 100)
+                    self.update_step('narration', progress, 'processing', f'{shots_with_narration}/{total_shots} shots have narration')
+            
+            if shots_with_music > 0:
+                if shots_with_music == total_shots:
+                    self.update_step('music', 100, 'completed', f'{total_shots} music cues defined')
+                else:
+                    progress = int((shots_with_music / total_shots) * 100)
+                    self.update_step('music', progress, 'processing', f'{shots_with_music}/{total_shots} shots have music')
+        
+        # Update overall progress
+        self.update_overall_progress()
     
     # Content Display Update Methods
     
@@ -903,20 +1184,26 @@ class GenerationProgressWindow:
         """Update the storyboard shot list display"""
         if not self.is_open or not hasattr(self, 'shot_cards'):
             return
-            
+        
         def update_shots():
-            # Update header
-            shot_count = len(shots)
-            self.shot_count_label.config(text=f"Shot List ({shot_count} shots)")
-            
-            # Clear existing shots
-            for widget in self.storyboard_scrollable_frame.winfo_children():
-                widget.destroy()
-            self.shot_cards.clear()
-            
-            # Add shots in grid layout (2 columns)
-            for idx, shot in enumerate(shots):
-                self.create_shot_card(shot, idx)
+            try:
+                # Update header
+                shot_count = len(shots)
+                self.shot_count_label.config(text=f"Shot List ({shot_count} shots)")
+                
+                # Clear existing shots
+                for widget in self.storyboard_scrollable_frame.winfo_children():
+                    widget.destroy()
+                self.shot_cards.clear()
+                
+                # Add shots in grid layout
+                for idx, shot in enumerate(shots):
+                    self.create_shot_card(shot, idx)
+                
+            except Exception as e:
+                print(f"Error in update_shots: {e}")
+                import traceback
+                traceback.print_exc()
             
             # Update scroll region
             self.storyboard_scrollable_frame.update_idletasks()
@@ -935,6 +1222,7 @@ class GenerationProgressWindow:
                 return getattr(obj, attr, default)
         
         shot_number = get_attr(shot, 'shot_number', index + 1)
+        wan_prompt = get_attr(shot, 'wan_prompt', '')
         
         # Create shot card frame in vertical layout
         card_frame = ttk.LabelFrame(self.storyboard_scrollable_frame, 
@@ -1004,16 +1292,15 @@ class GenerationProgressWindow:
         negative_prompt_text.pack(fill='x', pady=(2, 5))
         
         # Fill with prompt data or pending state
-        wan_prompt = get_attr(shot, 'wan_prompt', '')
         if wan_prompt and wan_prompt.strip():
             # Parse positive/negative from wan_prompt
             positive, negative = self._parse_wan_prompt(wan_prompt)
             
-            positive_prompt_text.config(state='normal')
+            positive_prompt_text.config(state='normal', bg='#f8fff8')
             positive_prompt_text.insert(tk.END, positive)
             positive_prompt_text.config(state='disabled')
             
-            negative_prompt_text.config(state='normal')
+            negative_prompt_text.config(state='normal', bg='#fff8f8')
             negative_prompt_text.insert(tk.END, negative)
             negative_prompt_text.config(state='disabled')
         else:
@@ -1026,6 +1313,40 @@ class GenerationProgressWindow:
             negative_prompt_text.insert(tk.END, "⏳ Pending generation...")
             negative_prompt_text.config(state='disabled')
         
+        # Narration Section (if available)
+        narration_text = get_attr(shot, 'narration', '')
+        if narration_text and narration_text.strip():
+            narration_frame = ttk.LabelFrame(card_frame, text="Narration Script", padding="5")
+            narration_frame.pack(fill='x', pady=(5, 0))
+            
+            narration_widget = tk.Text(narration_frame, 
+                                     height=2, wrap='word',
+                                     font=('Arial', 8),
+                                     bg='#fffef8', fg='#333333',
+                                     state='disabled')
+            narration_widget.pack(fill='x', pady=2)
+            
+            narration_widget.config(state='normal')
+            narration_widget.insert(tk.END, narration_text)
+            narration_widget.config(state='disabled')
+        
+        # Music Section (if available)
+        music_text = get_attr(shot, 'music_cue', '')
+        if music_text and music_text.strip():
+            music_frame = ttk.LabelFrame(card_frame, text="Music Cue", padding="5")
+            music_frame.pack(fill='x', pady=(5, 0))
+            
+            music_widget = tk.Text(music_frame, 
+                                 height=2, wrap='word',
+                                 font=('Arial', 8),
+                                 bg='#f8f8ff', fg='#333333',
+                                 state='disabled')
+            music_widget.pack(fill='x', pady=2)
+            
+            music_widget.config(state='normal')
+            music_widget.insert(tk.END, music_text)
+            music_widget.config(state='disabled')
+        
         # Status indicators (inline)
         status_frame = ttk.Frame(details_frame)
         status_frame.pack(fill='x', pady=(0, 5))
@@ -1035,16 +1356,20 @@ class GenerationProgressWindow:
         ttk.Label(status_frame, text=f"{prompt_status} Prompt", font=('Arial', 8)).pack(side='left')
         
         # Narration status  
-        narration_status = "✅" if get_attr(shot, 'narration', None) else "⏳"
-        ttk.Label(status_frame, text=f"{narration_status} Audio", font=('Arial', 8)).pack(side='right')
+        narration_status = "✅" if narration_text and narration_text.strip() else "⏳"
+        ttk.Label(status_frame, text=f"{narration_status} Audio", font=('Arial', 8)).pack(side='left', padx=(10, 0))
+        
+        # Music status
+        music_status = "✅" if music_text and music_text.strip() else "⏳"
+        ttk.Label(status_frame, text=f"{music_status} Music", font=('Arial', 8)).pack(side='right')
         
         # Progress bar at bottom
         render_progress = ttk.Progressbar(card_frame, mode='determinate')
         render_progress.pack(fill='x', pady=(5, 0))
         render_progress['value'] = 0
         
-        # Store card references
-        self.shot_cards[shot_number] = {
+        # Store card references (including optional widgets)
+        card_refs = {
             'frame': card_frame,
             'progress': render_progress,
             'preview': preview_placeholder,
@@ -1052,6 +1377,16 @@ class GenerationProgressWindow:
             'positive_prompt': positive_prompt_text,
             'negative_prompt': negative_prompt_text
         }
+        
+        # Add narration widget reference if it exists
+        if narration_text and narration_text.strip():
+            card_refs['narration_widget'] = narration_widget
+        
+        # Add music widget reference if it exists  
+        if music_text and music_text.strip():
+            card_refs['music_widget'] = music_widget
+            
+        self.shot_cards[shot_number] = card_refs
     
     def _parse_wan_prompt(self, wan_prompt: str) -> tuple[str, str]:
         """Parse wan_prompt to extract positive and negative prompts"""
@@ -1082,8 +1417,12 @@ class GenerationProgressWindow:
         return (positive, negative)
     
     def update_shot_prompts(self, shot_number: int, wan_prompt: str):
-        """Update the ComfyUI prompts for a specific shot"""
-        if not self.is_open or shot_number not in self.shot_cards:
+        """Update the ComfyUI prompts for a specific shot (only used during real-time generation)"""
+        if not self.is_open:
+            return
+        
+        if shot_number not in self.shot_cards:
+            # This can happen if the shot list hasn't been created yet
             return
             
         def update_prompts():
@@ -1109,15 +1448,84 @@ class GenerationProgressWindow:
         if self.window:
             self.window.after(0, update_prompts)
     
+    def update_shot_narration(self, shot_number: int, narration: str):
+        """Update narration for a specific shot (future-proof for real-time updates)"""
+        if not self.is_open or shot_number not in self.shot_cards:
+            return
+        
+        def update_narration():
+            card_refs = self.shot_cards[shot_number]
+            
+            # If narration widget doesn't exist, we need to recreate the shot card
+            if 'narration_widget' not in card_refs and narration and narration.strip():
+                # For now, we'll need to recreate the entire shot card
+                # This is a limitation that could be improved in the future
+                return
+            
+            # Update existing narration widget
+            if 'narration_widget' in card_refs:
+                narration_widget = card_refs['narration_widget']
+                narration_widget.config(state='normal')
+                narration_widget.delete(1.0, tk.END)
+                narration_widget.insert(tk.END, narration)
+                narration_widget.config(state='disabled')
+        
+        if self.window:
+            self.window.after(0, update_narration)
+    
+    def update_shot_music(self, shot_number: int, music_cue: str):
+        """Update music cue for a specific shot (future-proof for real-time updates)"""
+        if not self.is_open or shot_number not in self.shot_cards:
+            return
+        
+        def update_music():
+            card_refs = self.shot_cards[shot_number]
+            
+            # If music widget doesn't exist, we need to recreate the shot card
+            if 'music_widget' not in card_refs and music_cue and music_cue.strip():
+                # For now, we'll need to recreate the entire shot card
+                # This is a limitation that could be improved in the future
+                return
+            
+            # Update existing music widget
+            if 'music_widget' in card_refs:
+                music_widget = card_refs['music_widget']
+                music_widget.config(state='normal')
+                music_widget.delete(1.0, tk.END)
+                music_widget.insert(tk.END, music_cue)
+                music_widget.config(state='disabled')
+        
+        if self.window:
+            self.window.after(0, update_music)
+    
+    def update_shot_render_progress(self, shot_number: int, progress: float):
+        """Update render progress for a specific shot (future ComfyUI integration)"""
+        if not self.is_open or shot_number not in self.shot_cards:
+            return
+        
+        def update_progress():
+            progress_bar = self.shot_cards[shot_number]['progress']
+            progress_bar['value'] = progress
+        
+        if self.window:
+            self.window.after(0, update_progress)
+    
     def update_style_references(self, characters: list, locations: list, visual_style: dict):
         """Update the style references display"""
         if not self.is_open or not hasattr(self, 'style_scrollable_frame'):
             return
             
         def update_references():
-            # Clear existing content
+            # Clear existing content including placeholder
             for widget in self.style_scrollable_frame.winfo_children():
                 widget.destroy()
+            
+            # Clear placeholder reference if it exists
+            if hasattr(self, 'style_placeholder_frame'):
+                try:
+                    self.style_placeholder_frame.destroy()
+                except:
+                    pass
             
             # Create content sections
             main_frame = ttk.Frame(self.style_scrollable_frame)
@@ -1287,11 +1695,12 @@ class EnhancedGenerationManager:
     
     def start_generation_with_popup(self, config):
         """Start generation with progress popup"""
-        # Create progress window
+        # Create progress window with database manager
         self.progress_window = GenerationProgressWindow(
             self.main_app.root, 
             config,
-            self.on_generation_complete
+            self.on_generation_complete,
+            self.main_app.db
         )
         
         # Start generation in thread
@@ -1387,6 +1796,12 @@ class EnhancedGenerationManager:
                     self.progress_window.update_step('narration', 100, 'completed', f'{total_shots} narration scripts created')
                     self.progress_window.update_step('music', 100, 'completed', 'Music cues defined')
                     
+                    # Refresh the shot list with all final data to ensure prompts are displayed
+                    updated_shots = self.main_app.db.get_shots_by_story_id(story['id'])
+                    if updated_shots:
+                        # update_shot_list will handle all prompts during card creation
+                        self.progress_window.update_shot_list(updated_shots)
+                    
                     # Step 6: Queue setup
                     self.progress_window.update_step('queue', 50, 'processing', 'Adding shots to render queue...')
                     
@@ -1414,3 +1829,7 @@ class EnhancedGenerationManager:
         self.main_app.refresh_recent_stories()
         self.main_app.refresh_queue()
         self.main_app.refresh_metrics()
+        
+        # Auto-randomize inputs for next generation
+        self.main_app.randomize_inputs()
+        self.main_app.add_log("Auto-randomized settings for next generation", "Info")

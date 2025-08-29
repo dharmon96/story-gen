@@ -13,6 +13,14 @@ from typing import Dict, List, Optional
 from config import OLLAMA_CONFIG, SYSTEM_PROMPTS, DB_DIR, MODEL_CONFIGS
 from network_discovery import FastNetworkDiscovery
 
+# Try to import node manager
+try:
+    from node_manager import NodeManager, NodeType, ProcessingNode
+    NODE_MANAGER_AVAILABLE = True
+except ImportError:
+    NODE_MANAGER_AVAILABLE = False
+    print("Node manager not available")
+
 # Try to import ollama
 try:
     import ollama
@@ -45,6 +53,12 @@ class OllamaManager:
         # Legacy support
         self.available_models = []
         
+        # Multi-node support
+        self.multi_node_assignments = {}  # step -> [(instance_key, model), ...]
+        self.node_manager = None
+        if NODE_MANAGER_AVAILABLE:
+            self.node_manager = NodeManager()
+        
         # Load persistent settings
         self.load_model_settings()
         
@@ -62,21 +76,26 @@ class OllamaManager:
         
         # Get cached instances first (instant)
         cached_instances = self.network_discovery.get_cached_instances()
-        if cached_instances and not force:
+        if cached_instances:
             self.ollama_instances.update(cached_instances)
-        else:
-            # Background scan for new instances
-            def background_scan():
-                try:
-                    discovered = self.network_discovery.fast_scan()
+            print(f"Loaded {len(cached_instances)} cached instances")
+        
+        # Always do a background scan to refresh and discover new instances
+        def background_scan():
+            try:
+                discovered = self.network_discovery.fast_scan()
+                # Only update if we found more instances than cached
+                if len(discovered) >= len(cached_instances):
                     self.ollama_instances.update(discovered)
                     self.update_available_models()
                     print(f"Background scan found {len(discovered)} instances")
-                except Exception as e:
-                    print(f"Background scan error: {e}")
-            
-            # Non-blocking background scan
-            threading.Thread(target=background_scan, daemon=True).start()
+                else:
+                    print(f"Background scan found fewer instances ({len(discovered)}) than cache ({len(cached_instances)}), keeping cache")
+            except Exception as e:
+                print(f"Background scan error: {e}")
+        
+        # Always do non-blocking background scan (even with cache)
+        threading.Thread(target=background_scan, daemon=True).start()
         
         self.update_available_models()
         return self.ollama_instances
@@ -525,3 +544,36 @@ Technical specs: Resolution: 1920x1080, Steps: 30, CFG Scale: 7.5, Sampler: DPM+
         return """Scene: 1 (Opening)
 Music style: Ambient piano with subtle strings
 Duration: 30 seconds"""
+    # Multi-node management methods
+    
+    def add_node_to_step(self, step: str, instance_key: str, model_name: str) -> bool:
+        """Add an additional node to a generation step"""
+        if instance_key not in self.ollama_instances:
+            print(f"Instance {instance_key} not found")
+            return False
+            
+        instance = self.ollama_instances[instance_key]
+        if model_name not in instance.get('models', []):
+            print(f"Model {model_name} not available on {instance_key}")
+            return False
+        
+        # Initialize multi-node assignments for this step
+        if step not in self.multi_node_assignments:
+            self.multi_node_assignments[step] = []
+            
+            # Add current primary assignment if exists
+            primary_instance, primary_model = self.step_model_assignments.get(step, (None, None))
+            if primary_instance and primary_model:
+                self.multi_node_assignments[step].append((primary_instance, primary_model))
+        
+        # Add new assignment if not already present
+        assignment = (instance_key, model_name)
+        if assignment not in self.multi_node_assignments[step]:
+            self.multi_node_assignments[step].append(assignment)
+            self.save_model_settings()
+            print(f"Added node {instance_key} with model {model_name} to step {step}")
+            return True
+        
+        print(f"Node {instance_key} with model {model_name} already assigned to step {step}")
+        return False
+

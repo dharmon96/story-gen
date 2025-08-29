@@ -14,6 +14,11 @@ python main.py
 python test_research_simple.py
 ```
 
+### Character Consistency Testing
+```bash
+python test_character_consistency.py
+```
+
 ### Development Dependencies
 This project uses:
 - `tkinter` for GUI (built into Python)
@@ -53,44 +58,75 @@ A comprehensive research system has been added to analyze trending AI video cont
 - Enhanced error logging with detailed messages for debugging
 - Cleaned up redundant test files for better project organization
 
-## 🚀 Planned Updates (Next Sprint)
+## ✅ Completed Features (Current Version)
 
 ### Story Queue Management System
-**Priority: HIGH** - Enable batch story generation and queue management
-- **Story Queue Tab**: New GUI tab for managing multiple story generation requests
-- **Batch Processing**: Queue multiple stories with different configurations
-- **Priority System**: High/Normal/Low priority queue management
-- **Queue Persistence**: Save queue state across application restarts
-- **Progress Tracking**: Individual progress bars for each queued story
-- **Queue Statistics**: ETA calculations and throughput metrics
+**Status: COMPLETED** - Full batch story generation and queue management system
+- **Story Queue Tab**: Complete GUI tab with comprehensive queue management
+- **Batch Processing**: Queue multiple stories with different configurations and priorities
+- **Priority System**: 1-10 priority levels with automatic queue ordering
+- **Queue Persistence**: Full queue state persistence across application restarts
+- **Progress Tracking**: Real-time individual progress bars for each queued story
+- **Queue Statistics**: Live statistics, ETA calculations, and throughput metrics
+- **Continuous Generation**: Automated story generation when render queue is low
+- **Progress Windows**: Individual progress windows for each queue item
+- **Queue Controls**: Pause/resume, retry failed items, clear completed items
+- **Auto-randomization**: Automatic input randomization after queue completion
 
-### Additional Render Nodes & Distributed Processing
-**Priority: HIGH** - Scale video generation across multiple machines
-- **Render Node Discovery**: Auto-discover ComfyUI instances on network
-- **Load Balancing**: Distribute render jobs across available nodes
-- **Node Health Monitoring**: Real-time status and performance tracking
-- **Failover System**: Automatic job redistribution on node failures
-- **Resource Management**: Memory and GPU utilization monitoring
-- **Render Farm Dashboard**: Centralized node management interface
+**New Files:**
+- `story_queue.py` - Core queue management system with threading and continuous generation
+- `story_queue_tab.py` - Complete GUI interface for queue management and monitoring
 
-### UI/UX Cleanup & Modernization
-**Priority: MEDIUM** - Improve user experience and visual design
-- **Modern Theme System**: Dark/Light mode with accent color options
-- **Responsive Layout**: Better window resizing and component scaling
-- **Enhanced Progress Indicators**: More detailed generation progress
-- **Improved Error Handling**: User-friendly error messages and recovery
-- **Keyboard Shortcuts**: Hotkeys for common actions
-- **Drag & Drop**: File operations and queue reordering
-- **Status Bar**: Real-time system status and connection indicators
+### Multi-Node Processing Architecture  
+**Status: COMPLETED** - Distributed processing across multiple machines
+- **Node Manager**: `node_manager.py` - Complete multi-PC processing coordination
+- **Node Types**: TEXT_LLM, COMFYUI, and HYBRID processing capabilities
+- **Load Balancing**: Automatic task distribution based on node performance
+- **Heartbeat Monitoring**: Real-time node health monitoring and failover
+- **Task Queue**: Priority-based task distribution with retry mechanisms
+- **Node Discovery**: Auto-discovery of Ollama and ComfyUI services
+- **Performance Tracking**: Processing time analytics and load scoring
 
-### ComfyUI Integration Phase 1
-**Priority: HIGH** - Begin video generation automation
-- **ComfyUI Node Manager**: Discover and manage ComfyUI instances
-- **Workflow Templates**: Pre-built workflows for different video styles
-- **Automatic Workflow Execution**: Send prompts directly to ComfyUI
-- **Progress Monitoring**: Real-time render progress from ComfyUI
+### ComfyUI Style Card System
+**Status: COMPLETED** - Character and style consistency management
+- **ComfyUI Manager**: `comfyui_manager.py` - Style reference card generation
+- **Character Consistency**: Multi-angle character reference sheets
+- **Location Cards**: Establishing shot style references
+- **Style Templates**: Configurable templates for different content types
+- **Consistency Prompts**: Automatic character/location consistency in shots
+- **Database Integration**: Style reference storage and retrieval system
+- **Progress Integration**: Real-time style card generation progress tracking
+
+## 🚀 Current Development Focus
+
+### UI/UX Improvements & Bug Fixes
+**Priority: HIGH** - Address user experience issues identified in NEEDS FIXING.txt
+- **Settings Integration**: Move model configuration to settings tab (NEEDS FIXING.txt:1)
+- **Multi-Node Configuration**: Add multiple nodes per generation step (NEEDS FIXING.txt:3)
+- **Modern Theme System**: Dark/Light mode with Windows theme integration (NEEDS FIXING.txt:5)
+- **Progress Window Fixes**: Fix content loading mid-generation, disable auto-close (NEEDS FIXING.txt:9,11)
+- **Music & Narration Tab**: Add timeline view for music cues and narration (NEEDS FIXING.txt:13)
+- **Network Discovery**: Fix initial network instance discovery (NEEDS FIXING.txt:15)
+- **Queue Improvements**: Fix ETA calculations, clear completed button (NEEDS FIXING.txt:7,21)
+- **Shot Descriptions**: Enhance shot list detail for better ComfyUI prompts (NEEDS FIXING.txt:28)
+- **TikTok API Integration**: Update research system with official TikTok API (NEEDS FIXING.txt:25)
+- **OpenAI Config**: Fix permission errors saving custom presets (NEEDS FIXING.txt:23)
+
+### ComfyUI Video Generation Pipeline
+**Priority: HIGH** - Complete video generation automation
+- **Workflow Integration**: Direct ComfyUI workflow execution from shots
+- **Progress Monitoring**: Real-time render progress from ComfyUI nodes
 - **Output Management**: Automatic video file collection and organization
 - **Quality Control**: Automated video validation and retry logic
+- **Character Consistency**: Integration with style card system for consistent characters
+- **Batch Rendering**: Queue-based video generation across multiple ComfyUI nodes
+
+### Advanced Features
+**Priority: MEDIUM** - Enhanced functionality and integrations
+- **Audio Generation**: Suno API integration for music generation
+- **Voice Synthesis**: ElevenLabs integration for narration
+- **Footage Assembly**: Complete video assembly pipeline
+- **Advanced Analytics**: Performance metrics and optimization insights
 
 ## Architecture
 
@@ -154,31 +190,37 @@ A comprehensive research system has been added to analyze trending AI video cont
 - **Prompts Tab**: Future integration ready for visual prompts
 - Individual shot cards with render progress tracking
 
+**Multi-Node Processing**: `node_manager.py` 
+- Complete distributed processing system for TEXT_LLM and COMFYUI tasks
+- Node discovery, load balancing, and health monitoring
+- Task queue with priority management and automatic failover
+- Performance tracking and resource utilization monitoring
+
+**Style Card Generation**: `comfyui_manager.py`
+- Character and location consistency management
+- Style reference card generation with configurable templates
+- Shot-level consistency prompt integration
+- Database storage for reference data and retrieval
+
+**Story Queue System**: `story_queue.py` 
+- Complete batch story generation with priority management
+- Queue persistence, state recovery, and continuous generation
+- ETA calculations, throughput metrics, and retry mechanisms
+- Real-time progress tracking and callback integration
+
 **Future Components** (PLANNED):
 
-**Story Queue System**: `story_queue.py` (PLANNED)
-- Batch story generation queue with priority management
-- Queue persistence and state recovery
-- ETA calculations and throughput metrics
-- Individual story progress tracking
+**Footage Assembly**: `footage_assembler.py` (PLANNED)
+- Complete video assembly from individual shot renders
+- Timeline synchronization with narration and music
+- Transition effects and post-processing integration
+- Final video export and quality optimization
 
-**Render Farm Manager**: `render_farm.py` (PLANNED)
-- Multi-node ComfyUI discovery and management
-- Load balancing and job distribution
-- Node health monitoring and failover systems
-- Resource utilization tracking
-
-**ComfyUI Integration**: `comfyui_manager.py` (PLANNED)
-- ComfyUI node discovery and workflow management
-- Automatic prompt-to-video pipeline execution
-- Progress monitoring and output collection
-- Quality control and retry mechanisms
-
-**UI Modernization**: Enhanced GUI components (PLANNED)
-- Modern theme system with dark/light modes
-- Responsive layouts and improved UX
-- Keyboard shortcuts and drag-drop functionality
-- Enhanced error handling and user feedback
+**Advanced Analytics**: Enhanced monitoring and metrics (PLANNED)
+- Performance analytics across all generation steps  
+- Resource utilization tracking and optimization recommendations
+- Quality metrics and automated improvement suggestions
+- Historical data analysis and trend identification
 
 **Research System** (NEW):
 
@@ -238,17 +280,26 @@ A comprehensive research system has been added to analyze trending AI video cont
    - Research data integration with story generation
    - Performance tracking and prompt optimization
 
-6. **Story Queue Management** (PLANNED):
-   - Batch story generation with configurable parameters
-   - Priority-based queue processing with ETA calculations
-   - Queue persistence and recovery across application sessions
-   - Individual story progress tracking and management
+6. **Story Queue Management** (IMPLEMENTED):
+   - Batch story generation with full configuration options
+   - 1-10 priority system with automatic queue ordering
+   - Complete queue persistence and recovery across application sessions
+   - Individual story progress tracking with real-time windows
+   - Continuous generation when render queue is low
+   - Retry mechanisms and comprehensive error handling
 
-7. **Distributed Render Farm** (PLANNED):
-   - Multi-node ComfyUI discovery and load balancing
-   - Automatic job distribution and failover handling
-   - Real-time node health monitoring and resource tracking
-   - Centralized render farm management interface
+7. **Multi-Node Processing** (IMPLEMENTED):
+   - TEXT_LLM and COMFYUI node discovery and management
+   - Automatic load balancing based on node performance
+   - Real-time node health monitoring with heartbeat system
+   - Task queue with priority-based distribution and failover
+   - Performance analytics and resource utilization tracking
+
+8. **Character Consistency System** (IMPLEMENTED):
+   - Style reference card generation for characters and locations
+   - Shot-level consistency prompt integration
+   - ComfyUI workflow templates for different content types
+   - Database storage and retrieval of style references
 
 ### Genre System
 Eight supported genres with 20 unique prompts each:
@@ -288,26 +339,33 @@ Eight supported genres with 20 unique prompts each:
 
 ### Development Roadmap
 
-**Phase 1: Queue Management** (Next 2-3 weeks)
-1. Implement story queue database tables and models
-2. Create story queue GUI tab with queue management
-3. Add batch processing and priority system
-4. Implement queue persistence and recovery
+**Phase 1: UI/UX Improvements** (Current - Next 2-3 weeks) 
+1. ✅ Complete story queue management system
+2. ✅ Multi-node processing architecture  
+3. ✅ ComfyUI style card generation system
+4. 🔄 Address issues identified in NEEDS FIXING.txt:
+   - Move model configuration to settings tab
+   - Fix progress window content loading
+   - Add music & narration timeline tab
+   - Implement dark/light theme system
+   - Fix queue ETA calculations and clearing
+   - Enhance shot descriptions for better ComfyUI prompts
 
-**Phase 2: Render Farm Setup** (Weeks 3-5)
-1. Develop ComfyUI node discovery system
-2. Implement render job distribution and load balancing
-3. Add node health monitoring and failover
-4. Create render farm dashboard
+**Phase 2: Video Generation Pipeline** (Weeks 3-6)
+1. Complete ComfyUI workflow execution integration
+2. Implement real-time render progress monitoring
+3. Add automatic video file collection and organization
+4. Develop quality control and retry mechanisms
+5. Integrate character consistency system with video generation
 
-**Phase 3: ComfyUI Integration** (Weeks 4-7)
-1. Build ComfyUI API integration layer
-2. Create workflow templates for different video styles
-3. Implement automatic prompt-to-video pipeline
-4. Add progress monitoring and output management
+**Phase 3: Audio Integration** (Weeks 5-8)
+1. Suno API integration for music generation
+2. ElevenLabs API for voice synthesis and narration
+3. Timeline synchronization between audio and video
+4. Music transition and fade system implementation
 
-**Phase 4: UI/UX Polish** (Weeks 6-8)
-1. Implement modern theme system
-2. Improve responsive layouts and components
-3. Add keyboard shortcuts and drag-drop
-4. Enhanced error handling and user feedback
+**Phase 4: Final Assembly** (Weeks 7-10)
+1. Complete footage assembly pipeline
+2. Advanced video editing and transition effects
+3. Quality optimization and export system
+4. Performance analytics and monitoring dashboard

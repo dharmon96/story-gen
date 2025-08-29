@@ -295,9 +295,20 @@ class StoryQueue:
         with self.lock:
             return self.current_queue_item.copy() if self.current_queue_item else None
     
-    def clear_completed_items(self, older_than_days: int = 7):
-        """Clear old completed queue items"""
-        return self.db.clear_completed_queue_items(older_than_days)
+    def clear_completed_items(self, older_than_days: int = None):
+        """Clear completed queue items"""
+        if older_than_days is None:
+            # Clear all completed items immediately (for UI calls)
+            cursor = self.db.conn.cursor()
+            cursor.execute('''
+                DELETE FROM story_queue 
+                WHERE status IN ('completed', 'failed')
+            ''')
+            self.db.conn.commit()
+            return cursor.rowcount
+        else:
+            # Clear only old completed items (for maintenance)
+            return self.db.clear_completed_queue_items(older_than_days)
     
     def get_queue_item_by_story_id(self, story_id: str) -> Optional[Dict]:
         """Get queue item by associated story ID"""

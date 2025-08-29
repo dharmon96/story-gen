@@ -237,7 +237,7 @@ STORYTELLING RULES:
   "shots": [
     {
       "shot_number": 1,
-      "description": "person walking toward door looking worried", 
+      "description": "Maya, a worried 30-year-old woman in casual clothes, approaches the weathered wooden front door of an old Victorian house, her steps hesitant and cautious", 
       "duration": 4.0,
       "frames": 96,
       "camera": "medium shot tracking",
@@ -246,7 +246,7 @@ STORYTELLING RULES:
     },
     {
       "shot_number": 2,
-      "description": "close up of hand opening door slowly",
+      "description": "Maya's trembling hand with chipped nail polish slowly turns the ornate brass doorknob, the metal creaking softly in the dim porch lighting",
       "duration": 3.0,
       "frames": 72,
       "camera": "close up static",
@@ -264,7 +264,20 @@ CINEMATOGRAPHY ANALYSIS RULES:
 - Create visual flow: wide establishing shots, medium for dialogue, close-ups for emotion
 - Camera types: wide shot, medium shot, close up, extreme close up  
 - Camera movements: static, tracking, pan, tilt, zoom in, zoom out
-- Description format: [subject] [action] [emotion/mood] (no camera terms in description)
+
+DESCRIPTION REQUIREMENTS (CRITICAL FOR AI GENERATION):
+- CHARACTER DETAILS: Always specify character name, age/appearance, clothing, emotional state
+- LOCATION SPECIFICS: Describe the setting with environmental details, lighting, atmosphere
+- CHARACTER ACTIONS: Detail specific movements, gestures, facial expressions, body language  
+- PHYSICAL DETAILS: Include props, textures, colors, materials that add visual richness
+- MOOD/ATMOSPHERE: Convey the emotional tone through environmental and character descriptions
+- FORMAT: [Character with details] [specific action with context] [in detailed location setting]
+- EXAMPLES:
+  * BAD: "Maya goes into kitchen"
+  * GOOD: "Maya, disheveled and anxious in her wrinkled pajamas, cautiously enters the dimly lit kitchen with peeling wallpaper, morning sunlight filtering through dirty windows"
+  * BAD: "Man opens box"  
+  * GOOD: "Thomas, elderly man with weathered hands, carefully lifts the ornate wooden lid of an antique jewelry box, revealing velvet-lined compartments in the golden lamplight"
+
 - Add narration ONLY when characters speak dialogue from the story
 - Add music cues ONLY at major emotional beats (max 3-4 per story)
 - Leave music_cue as null for most shots - silence is powerful
@@ -276,8 +289,11 @@ CINEMATOGRAPHY ANALYSIS RULES:
 Positive: [create rich visual description - use 30-50 words total]
 Negative: text, watermark, blurry, distorted, extra limbs, low quality, bad anatomy
 
-EXAMPLE:
-Positive: young woman walking through dark hallway, worried expression, dramatic side lighting casting long shadows on walls, cinematic atmosphere, photorealistic style, medium shot, sharp focus, high detail
+EXAMPLES:
+Positive: Maya, worried 30-year-old woman in casual clothes, cautiously approaching weathered wooden door of Victorian house, hesitant steps on creaking porch, dim lighting, medium shot tracking forward, cinematic depth of field, photorealistic style, sharp focus, high detail
+Negative: text, watermark, blurry, distorted, extra limbs, low quality, bad anatomy
+
+Positive: elderly man with weathered hands carefully lifting ornate wooden jewelry box lid, revealing velvet compartments, golden lamplight illuminating intricate details, extreme close-up static shot, shallow focus, photorealistic style, sharp focus, high detail
 Negative: text, watermark, blurry, distorted, extra limbs, low quality, bad anatomy
 
 CHARACTER CONSISTENCY RULES (PRIORITY):
@@ -285,15 +301,41 @@ CHARACTER CONSISTENCY RULES (PRIORITY):
 - Use exact physical descriptions: age, hair color/style, clothing, distinctive features
 - Maintain character appearance consistency across all shots they appear in
 - Character descriptions should come FIRST in the positive prompt before scene elements
-- Format: [character description] [action/scene] [lighting/mood] [technical quality]
 
-CREATIVE VISUAL RULES:
-- Analyze the shot description and camera direction to create the best possible visual
+ACTION & MOVEMENT EMPHASIS (CRITICAL):
+- Extract specific actions from shot description: "walking", "opening", "turning", "reaching", "looking"
+- Include character movement details: "hesitant steps", "trembling hands", "quick glance", "slow approach"
+- Add action verbs and motion: "approaching", "lifting", "revealing", "entering", "examining"
+- Describe body language: "cautious posture", "tense shoulders", "focused expression"
+- Include interaction with objects: "gripping doorknob", "touching surface", "handling carefully"
+
+SCENE DETAILS ENHANCEMENT (CRITICAL):
+- Environmental specifics: "weathered wooden door", "peeling wallpaper", "ornate brass fixture"
+- Texture descriptions: "rough stone", "smooth marble", "worn fabric", "polished metal"
+- Atmospheric elements: "dust particles in light", "shadows on walls", "morning mist"
+- Props and objects: "antique jewelry box", "velvet-lined compartments", "intricate carvings"
+- Setting context: "Victorian house porch", "dimly lit kitchen", "golden lamplight"
+
+CAMERA MOVEMENT INTEGRATION (CRITICAL):
+- Static shots: "static shot", "fixed camera angle", "steady composition"
+- Tracking shots: "camera tracking forward", "following movement", "smooth dolly shot"
+- Pan/Tilt: "camera panning left", "tilting up to reveal", "sweeping across scene"
+- Zoom: "slow zoom in", "camera pushing closer", "gradual zoom out"
+- Shot types: "extreme close-up", "medium shot", "wide establishing shot", "over-the-shoulder"
+- Camera angles: "low angle looking up", "high angle view", "eye-level perspective"
+
+PROMPT STRUCTURE (MANDATORY ORDER):
+1. Character description with appearance details
+2. Specific action/movement with body language  
+3. Environmental/scene details with textures
+4. Camera shot type and movement
+5. Lighting and atmosphere
+6. Technical quality: "photorealistic style, sharp focus, high detail"
+
+LIGHTING & CINEMATIC QUALITY:
 - Add compelling lighting: dramatic shadows, warm/cool tones, contrast, atmosphere
 - Enhance mood through environmental details: weather, time of day, setting ambiance
-- Include artistic elements: composition, color palette, visual style
-- Add cinematic quality: depth of field, film grain, professional cinematography
-- Specify exact camera work from the shot list (close up, wide shot, tracking, etc.)
+- Include cinematic elements: depth of field, film grain, professional cinematography
 - Create vivid, film-quality imagery that brings the story to life
 - Always end with "photorealistic style, sharp focus, high detail"
 - Use consistent negative prompts for quality""",
@@ -635,9 +677,9 @@ HOOK: [5 words max]
 
 Continue for each part. No extra text.""",
             'shot_list_creator': """Create shot list in JSON format:
-{"shots": [{"shot_number": 1, "description": "brief description", "duration": 3.0, "camera": "medium shot", "narration": "dialogue", "music_cue": null}], "total_duration": 3.0}
+{"shots": [{"shot_number": 1, "description": "character name, appearance, specific action in detailed location setting", "duration": 3.0, "camera": "medium shot", "narration": "dialogue", "music_cue": null}], "total_duration": 3.0}
 
-Keep descriptions under 10 words each.""",
+Include character details, location specifics, actions, and visual elements. Descriptions should be 15-25 words for clear AI generation.""",
             'prompt_engineer': SYSTEM_PROMPTS['prompt_engineer'],
             'narration_writer': SYSTEM_PROMPTS['narration_writer'],
             'music_director': SYSTEM_PROMPTS['music_director']

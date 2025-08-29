@@ -2,27 +2,27 @@
   "step_model_assignments": {
     "story": [
       "localhost:11434",
-      "gpt-oss:20b"
+      "llama3.1:latest"
     ],
     "characters": [
       "localhost:11434",
-      "deepseek-r1:8b"
+      "llama3.1:latest"
     ],
     "shots": [
       "localhost:11434",
-      "gpt-oss:20b"
+      "llama3.1:latest"
     ],
     "prompts": [
       "localhost:11434",
-      "deepseek-r1:8b"
+      "llama3.1:latest"
     ],
     "narration": [
       "localhost:11434",
-      "deepseek-r1:8b"
+      "llama3.1:latest"
     ],
     "music": [
       "localhost:11434",
-      "deepseek-r1:8b"
+      "llama3.1:latest"
     ]
   },
   "config": {

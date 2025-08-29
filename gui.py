@@ -217,7 +217,7 @@ class FilmGeneratorApp:
                 
                 # Create a minimal config for the progress window
                 config = StoryConfig(prompt="Render monitoring", genre="N/A", length="N/A")
-                progress_window = GenerationProgressWindow(None, config)
+                progress_window = GenerationProgressWindow(None, config, db_manager=self.db)
                 progress_window.root.title(f"Render Progress - {story_title}")
                 
                 # Store reference
@@ -396,14 +396,12 @@ class FilmGeneratorApp:
                 command=self.scan_network_instances).pack(side='right', padx=2)
         ttk.Button(status_row, text="🔄 Refresh", 
                 command=self.refresh_all_connections).pack(side='right', padx=2)
-        ttk.Button(status_row, text="🔧 Configure Models", 
-                command=self.open_model_dialog, style='Accent.TButton').pack(side='right', padx=2)
         
-        # Current assignments display
+        # Current assignments display (simplified for overview)
         assignments_row = ttk.Frame(ai_frame)
         assignments_row.pack(fill='x', pady=(5, 0))
         
-        ttk.Label(assignments_row, text="Model Assignments:", 
+        ttk.Label(assignments_row, text="Model Config:", 
                  font=('Arial', 9, 'bold')).pack(side='left')
         
         self.assignments_display = ttk.Label(assignments_row, text="Not configured", 
@@ -433,24 +431,11 @@ class FilmGeneratorApp:
             ttk.Label(ai_frame, text="Install ollama and run 'ollama serve' to enable AI", 
                     font=('Arial', 9, 'italic')).pack(pady=5)
         else:
-            ttk.Label(ai_frame, text="Use 'Configure Models' for per-step assignments or 'Quick Select' for all steps", 
+            ttk.Label(ai_frame, text="Use 'Quick Select' for all steps or configure per-step in Settings tab", 
                     font=('Arial', 8, 'italic')).pack(pady=(5, 0))
         
         # Rest of existing setup_story_tab code...
         # (Progress Frame, Configuration frame, etc. - keep all existing code)
-        
-        # Progress Frame
-        progress_frame = ttk.LabelFrame(main_frame, text="Generation Progress", padding="10")
-        progress_frame.pack(fill='x', pady=(0, 10))
-        
-        self.progress_var = tk.DoubleVar()
-        self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, 
-                                           maximum=100, length=600)
-        self.progress_bar.pack(fill='x', pady=(0, 5))
-        
-        self.progress_text = ttk.Label(progress_frame, text="Ready to generate stories...", 
-                                      font=('Arial', 9, 'italic'))
-        self.progress_text.pack()
         
         # Configuration frame
         config_frame = ttk.LabelFrame(main_frame, text="Parameters", padding="15")
@@ -595,41 +580,6 @@ class FilmGeneratorApp:
                                       font=('Arial', 10))
         self.status_label.pack(pady=5)
         
-        # Recent Stories
-        recent_frame = ttk.LabelFrame(main_frame, text="Recent Stories", padding="10")
-        recent_frame.pack(fill='both', expand=True)
-        
-        columns = ('ID', 'Title', 'Genre', 'Status', 'Created')
-        self.stories_tree = ttk.Treeview(recent_frame, columns=columns, 
-                                         show='tree headings', height=6)
-        
-        for col in columns:
-            self.stories_tree.heading(col, text=col)
-            self.stories_tree.column(col, width=150)
-        
-        self.stories_tree.column('#0', width=0, stretch=False)
-        self.stories_tree.column('ID', width=100)
-        
-        scrollbar = ttk.Scrollbar(recent_frame, orient='vertical', 
-                                 command=self.stories_tree.yview)
-        self.stories_tree.configure(yscrollcommand=scrollbar.set)
-        
-        self.stories_tree.pack(side='left', fill='both', expand=True)
-        scrollbar.pack(side='right', fill='y')
-        
-        # Current Story Display
-        story_display_frame = ttk.LabelFrame(main_frame, text="Current Story", padding="10")
-        story_display_frame.pack(fill='both', expand=True)
-        
-        export_frame = ttk.Frame(story_display_frame)
-        export_frame.pack(fill='x', pady=(0, 5))
-        
-        ttk.Button(export_frame, text="Export Story & Shots", 
-                  command=self.export_current_story).pack(side='right')
-        
-        self.story_display = scrolledtext.ScrolledText(story_display_frame, 
-                                                       height=8, wrap='word')
-        self.story_display.pack(fill='both', expand=True)
     
     def setup_research_tab(self):
         """Setup research tab"""
@@ -760,7 +710,7 @@ class FilmGeneratorApp:
         """Setup story queue tab"""
         # Initialize the story queue tab component
         self.story_queue_tab_component = StoryQueueTab(self.story_queue_tab, self.story_queue, 
-                                                     self.story_gen, self.db)
+                                                     self.story_gen, self.db, main_app=self)
     
     def setup_render_queue_tab(self):
         """Setup render queue tab with clear all functionality"""
@@ -901,6 +851,30 @@ class FilmGeneratorApp:
         preset_info = f"'{current_preset.get('name', 'Default')}' - {current_preset.get('description', 'Standard prompts')}"
         ttk.Label(preset_frame, text=preset_info, font=('Arial', 9)).pack(side='left', padx=10)
         
+        # Model Configuration Section
+        model_frame = ttk.LabelFrame(main_frame, text="AI Model Configuration", padding="15")
+        model_frame.pack(fill='x', pady=(0, 15))
+        
+        # Model assignments overview
+        assignments_overview_frame = ttk.Frame(model_frame)
+        assignments_overview_frame.pack(fill='x', pady=(0, 10))
+        
+        self.setup_model_assignments_overview(assignments_overview_frame)
+        
+        # Model configuration buttons
+        model_button_frame = ttk.Frame(model_frame)
+        model_button_frame.pack(fill='x', pady=(10, 0))
+        
+        ttk.Button(model_button_frame, text="🔧 Configure Models", 
+                  command=self.open_model_dialog, 
+                  style='Accent.TButton').pack(side='left', padx=5)
+        
+        ttk.Button(model_button_frame, text="🔄 Refresh Connections", 
+                  command=self.refresh_all_connections).pack(side='left', padx=5)
+        
+        ttk.Button(model_button_frame, text="🔍 Network Scan", 
+                  command=self.scan_network_instances).pack(side='left', padx=5)
+        
         # Settings buttons
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill='x', pady=20)
@@ -998,10 +972,148 @@ System Prompt Presets:
         except Exception as e:
             self.add_log(f"Failed to open settings folder: {e}", "Error")
     
+    def setup_model_assignments_overview(self, parent_frame):
+        """Setup detailed model assignments overview in settings tab"""
+        # Header
+        header_frame = ttk.Frame(parent_frame)
+        header_frame.pack(fill='x', pady=(0, 10))
+        
+        ttk.Label(header_frame, text="AI Generation Steps Configuration", 
+                 font=('Arial', 12, 'bold')).pack(side='left')
+        
+        # Create scrollable frame for assignments
+        canvas = tk.Canvas(parent_frame, height=200)
+        scrollbar = ttk.Scrollbar(parent_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Table header
+        header_row = ttk.Frame(scrollable_frame)
+        header_row.pack(fill='x', padx=5, pady=(0, 5))
+        
+        ttk.Label(header_row, text="Step", width=15, font=('Arial', 9, 'bold')).pack(side='left')
+        ttk.Label(header_row, text="Instance", width=20, font=('Arial', 9, 'bold')).pack(side='left')
+        ttk.Label(header_row, text="Model", width=25, font=('Arial', 9, 'bold')).pack(side='left')
+        ttk.Label(header_row, text="Status", width=12, font=('Arial', 9, 'bold')).pack(side='left')
+        
+        # Store reference for updating
+        self.model_assignments_frame = scrollable_frame
+        
+        # Pack canvas and scrollbar
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Populate with current assignments
+        self.update_model_assignments_overview()
+    
+    def update_model_assignments_overview(self):
+        """Update the detailed model assignments display"""
+        if not hasattr(self, 'model_assignments_frame'):
+            return
+            
+        # Clear existing assignment rows (keep header)
+        for child in self.model_assignments_frame.winfo_children()[1:]:  # Skip header
+            child.destroy()
+        
+        # Get current assignments
+        assignments = self.ollama.get_step_assignments()
+        instances = self.ollama.get_available_instances()
+        
+        # AI generation steps
+        ai_steps = {
+            'story': 'Story Writer',
+            'characters': 'Character Dev',
+            'shots': 'Shot Creator', 
+            'prompts': 'Prompt Engineer',
+            'narration': 'Narrator',
+            'music': 'Music Director'
+        }
+        
+        for step_key, step_name in ai_steps.items():
+            # Create expandable section for each step
+            step_section = ttk.Frame(self.model_assignments_frame)
+            step_section.pack(fill='x', padx=5, pady=2)
+            
+            # Main row with primary node info
+            main_row = ttk.Frame(step_section)
+            main_row.pack(fill='x')
+            
+            # Step name
+            ttk.Label(main_row, text=step_name, width=15, font=('Arial', 9, 'bold')).pack(side='left')
+            
+            # Get primary assignment for this step
+            instance_key, model = assignments.get(step_key, (None, None))
+            
+            if instance_key and model:
+                # Primary instance info
+                instance_info = instances.get(instance_key, {})
+                instance_display = f"{instance_info.get('host', 'Unknown')}:{instance_info.get('port', '?')}"
+                ttk.Label(main_row, text=f"[PRIMARY] {instance_display}", width=25).pack(side='left')
+                
+                # Model name
+                ttk.Label(main_row, text=model, width=20).pack(side='left')
+                
+                # Status check
+                is_connected = instance_key in instances and model in instances[instance_key].get('models', [])
+                if is_connected:
+                    status_label = ttk.Label(main_row, text="✅ Online", width=12, foreground="green")
+                else:
+                    status_label = ttk.Label(main_row, text="❌ Offline", width=12, foreground="red")
+                status_label.pack(side='left')
+                
+                # Node count (will show additional nodes if any)
+                multi_assignments = getattr(self.ollama, 'multi_node_assignments', {}).get(step_key, [])
+                additional_count = len(multi_assignments) - 1 if len(multi_assignments) > 1 else 0
+                
+                if additional_count > 0:
+                    count_label = ttk.Label(main_row, text=f"(+{additional_count} more)", 
+                                          font=('Arial', 8), foreground="blue")
+                    count_label.pack(side='left', padx=(5, 0))
+                    
+                    # Show additional nodes
+                    for i, (add_instance_key, add_model) in enumerate(multi_assignments[1:], 1):
+                        add_row = ttk.Frame(step_section)
+                        add_row.pack(fill='x', padx=(20, 0))
+                        
+                        ttk.Label(add_row, text="", width=15).pack(side='left')  # Spacer
+                        
+                        add_instance_info = instances.get(add_instance_key, {})
+                        add_instance_display = f"{add_instance_info.get('host', 'Unknown')}:{add_instance_info.get('port', '?')}"
+                        ttk.Label(add_row, text=f"[BACKUP {i}] {add_instance_display}", 
+                                 width=25, font=('Arial', 8)).pack(side='left')
+                        
+                        ttk.Label(add_row, text=add_model, width=20, font=('Arial', 8)).pack(side='left')
+                        
+                        # Status check for additional node
+                        add_is_connected = (add_instance_key in instances and 
+                                          add_model in instances[add_instance_key].get('models', []))
+                        if add_is_connected:
+                            add_status_label = ttk.Label(add_row, text="✅ Online", width=12, 
+                                                        foreground="green", font=('Arial', 8))
+                        else:
+                            add_status_label = ttk.Label(add_row, text="❌ Offline", width=12, 
+                                                        foreground="red", font=('Arial', 8))
+                        add_status_label.pack(side='left')
+                        
+            else:
+                # Not configured
+                ttk.Label(main_row, text="Not configured", width=25, foreground="gray").pack(side='left')
+                ttk.Label(main_row, text="", width=20).pack(side='left')
+                ttk.Label(main_row, text="⚪ Unassigned", width=12, foreground="gray").pack(side='left')
+    
     def refresh_settings_display(self):
         """Refresh the settings tab display"""
-        # This would refresh the settings tab content
-        # For now, just log that it should be refreshed
+        # Refresh model assignments overview
+        if hasattr(self, 'update_model_assignments_overview'):
+            self.update_model_assignments_overview()
+        
         self.add_log("Settings display refreshed", "Info")
     
     # Action Methods
@@ -1101,10 +1213,9 @@ System Prompt Presets:
         return random.choice(list(VISUAL_STYLES.keys()))
     
     def update_progress(self, value: float, text: str):
-        """Update progress bar and text"""
-        self.progress_var.set(value)
-        self.progress_text.config(text=text)
-        self.root.update_idletasks()
+        """Update progress bar and text - DEPRECATED: Progress now shown in queue tab"""
+        # Progress bar removed from main tab - now shown in story queue tab
+        pass
     
     def stop_generation(self):
         """Stop story generation"""
@@ -1145,7 +1256,7 @@ System Prompt Presets:
                     self.current_story = story
                     self.current_shots = shots
                     
-                    self.root.after(0, self.update_story_display, story)
+                    # Story display moved to queue tab - no need to update display here
                     self.root.after(0, self.refresh_recent_stories)
                     self.root.after(0, self.refresh_queue)
                     
@@ -1288,56 +1399,13 @@ System Prompt Presets:
         self.add_log("Reset failed items in render queue for retry", "Database")
     
     def update_story_display(self, story: Dict):
-        """Update story display"""
-        self.story_display.delete('1.0', tk.END)
-        
-        display_text = f"{'='*60}\n"
-        display_text += f"STORY GENERATED\n"
-        display_text += f"{'='*60}\n\n"
-        display_text += f"Title: {story['title']}\n"
-        display_text += f"Genre: {story['genre']}\n"
-        display_text += f"Length: {story['length']}\n"
-        display_text += f"Parts: {story['parts']}\n\n"
-        display_text += f"{'='*60}\n"
-        display_text += f"STORY CONTENT:\n"
-        display_text += f"{'='*60}\n\n"
-        display_text += story['content']
-        
-        self.story_display.insert('1.0', display_text)
-        self.story_display.see('1.0')
+        """Update story display - DEPRECATED: Story display removed from main tab"""
+        # Story display section removed from main tab - stories now shown in queue tab
+        pass
     
     def export_current_story(self):
-        """Export current story and shots"""
-        if not self.current_story:
-            messagebox.showwarning("No Story", "Generate a story first before exporting")
-            return
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"story_export_{timestamp}.json"
-        
-        export_data = {
-            'story': self.current_story,
-            'shots': [
-                {
-                    'shot_number': shot.shot_number,
-                    'description': shot.description,
-                    'duration': shot.duration,
-                    'wan_prompt': shot.wan_prompt,
-                    'narration': shot.narration,
-                    'music_cue': shot.music_cue,
-                    'status': shot.status
-                } for shot in self.current_shots
-            ],
-            'generation_timestamp': timestamp,
-            'ollama_model': OLLAMA_CONFIG['model'] if self.ollama.available else 'simulation'
-        }
-        
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(export_data, f, indent=2, ensure_ascii=False)
-        
-        messagebox.showinfo("Export Complete", 
-                           f"Story and {len(self.current_shots)} shots exported to:\n{filename}")
-        self.add_log(f"Exported story to {filename}", "Info")
+        """Export current story and shots - DEPRECATED: Current story section removed"""
+        messagebox.showinfo("Export Unavailable", "Story export is now handled through the Story Queue tab")
     
     # Helper Methods
     def add_log(self, message: str, log_type: str = "Info"):
@@ -1381,20 +1449,9 @@ System Prompt Presets:
         self.add_log(f"Logs exported to {filename}", "Info")
     
     def refresh_recent_stories(self):
-        """Refresh recent stories list"""
-        for item in self.stories_tree.get_children():
-            self.stories_tree.delete(item)
-        
-        stories = self.db.get_recent_stories(20)
-        
-        for story in stories:
-            self.stories_tree.insert('', 'end', values=(
-                story['id'][:12] + '...',
-                story['title'],
-                story['genre'],
-                story['status'],
-                story['created_at'][:16]
-            ))
+        """Refresh recent stories list - DEPRECATED: Recent stories removed from main tab"""
+        # Recent stories section removed from main tab - stories now managed in queue tab
+        pass
     
     def refresh_metrics(self):
         """Refresh metrics display"""
@@ -1770,14 +1827,14 @@ System Prompt Presets:
             self.add_log("Model configuration updated", "AI")
     
     def update_assignments_display(self):
-        """Update the assignments display label"""
+        """Update the assignments display label and settings tab overview"""
         assignments = self.ollama.get_step_assignments()
         configured_steps = [step for step, (instance, model) in assignments.items() 
                            if instance and model]
         
         if configured_steps:
             self.assignments_display.config(
-                text=f"{len(configured_steps)}/5 steps configured",
+                text=f"{len(configured_steps)}/6 steps configured",
                 foreground="green"
             )
         else:
@@ -1785,6 +1842,10 @@ System Prompt Presets:
                 text="Not configured",
                 foreground="gray"
             )
+        
+        # Also update the detailed settings tab overview
+        if hasattr(self, 'update_model_assignments_overview'):
+            self.update_model_assignments_overview()
     
     def on_legacy_model_selected(self, event=None):
         """Handle legacy model selection (sets all steps to same model)"""
@@ -1862,8 +1923,7 @@ System Prompt Presets:
             self.refresh_metrics() 
             self.refresh_queue()
             
-            # Clear story display
-            self.story_display.delete('1.0', tk.END)
+            # Clear story state
             self.current_story = None
             self.current_shots = []
             

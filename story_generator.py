@@ -429,6 +429,13 @@ Length: {story['length']}
                 story['character_prompts'] = character_prompts
                 add_log(f"Generated ComfyUI prompts for {len(character_prompts)} characters", "AI")
                 
+                # Save characters and locations to database for persistence
+                for character in characters:
+                    self.db.save_story_character(story['id'], character)
+                
+                for location in locations:
+                    self.db.save_story_location(story['id'], location)
+                
                 # Update style references display
                 if self.progress_window and hasattr(self.progress_window, 'update_style_references'):
                     self.progress_window.update_style_references(characters, locations, visual_style)
@@ -504,6 +511,10 @@ Length: {story['length']}
                 ''', (shot.wan_prompt, shot.narration, shot.music_cue, shot_id))
                 self.db.conn.commit()
                 add_log(f"Shot {shot.shot_number} saved and ready for rendering", "Database")
+                
+                # Update shot display with new prompts immediately
+                if self.progress_window and hasattr(self.progress_window, 'update_shot_prompts'):
+                    self.progress_window.update_shot_prompts(shot.shot_number, shot.wan_prompt)
                 
                 # Add to render queue
                 priority = 10 if shot.shot_number == 1 else 5
@@ -604,6 +615,8 @@ Concept: {config.prompt}"""
             
             # Update content display if progress window is available
             if self.progress_window:
+                # Set current story ID for chat message saving
+                self.progress_window.current_story_id = story['id']
                 self.progress_window.update_story_content(story)
             
             return story
@@ -677,6 +690,11 @@ Length: {story['length']}
                         shots.append(shot)
                         
                     if shots:
+                        # Save shots to database immediately for persistence
+                        for shot in shots:
+                            shot_id = self.db.save_shot(shot)
+                            shot.id = shot_id
+                        
                         # Update storyboard display if progress window is available
                         if self.progress_window:
                             self.progress_window.update_shot_list(shots)
